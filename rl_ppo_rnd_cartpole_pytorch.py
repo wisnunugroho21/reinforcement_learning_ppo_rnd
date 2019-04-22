@@ -132,7 +132,6 @@ class Utils:
       
     def q_values(self, reward, next_state, done, value_function):
         # Finding Q Values
-        # Q = R + V(St+1)
         q_values = reward + (1 - done) * self.gamma * value_function(next_state)           
         return q_values
         
@@ -140,7 +139,7 @@ class Agent:
     def __init__(self, state_dim, action_dim):        
         self.eps_clip = 0.2
         self.K_epochs = 5
-        self.entropy_coef = 0.1
+        self.entropy_coef = 0.01
         self.vf_loss_coef = 1
         self.update_proportion = 0.25
         
@@ -165,7 +164,7 @@ class Agent:
         state_target = state_target.detach() #Don't update target state value
                 
         # Getting entropy from the action probability
-        dist_entropy = torch.mean(self.utils.entropy(action_probs)).detach()
+        dist_entropy = torch.mean(self.utils.entropy(action_probs))
         
         # Discounting external reward and getting external advantages
         external_rewards = self.utils.discounted(rewards).detach() 

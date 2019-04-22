@@ -143,7 +143,7 @@ class Agent:
     def __init__(self, state_dim, action_dim):        
         self.eps_clip = 0.2
         self.K_epochs = 5
-        self.entropy_coef = 0.1
+        self.entropy_coef = 0.01
         self.vf_loss_coef = 1
         self.update_proportion = 0.25
         
@@ -171,7 +171,7 @@ class Agent:
         dist_entropy = torch.mean(self.utils.entropy(action_probs))
         
         # Discounting external reward and getting external advantages
-        external_rewards = self.utils.discounted(rewards).detach() 
+        external_rewards = self.utils.discounted(rewards).detach()
         external_advantage = external_rewards - ex_value
                     
         # Discounting internal reward and getting internal advantages
@@ -180,7 +180,7 @@ class Agent:
         intrinsic_advantage = intrinsic_rewards - in_value          
         
         # Getting overall advantages
-        advantages = (external_advantage + intrinsic_advantage)
+        advantages = (external_advantage + intrinsic_advantage).detach()
         
         # Getting loss for state predictor
         forward_loss = (state_target - state_pred).pow(2).mean(1)        
