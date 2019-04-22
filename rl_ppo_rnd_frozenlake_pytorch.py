@@ -176,7 +176,7 @@ class Agent:
                     
         # Discounting internal reward and getting internal advantages
         intrinsic_rewards = (state_target - state_pred).pow(2).sum(1)
-        intrinsic_rewards = self.utils.discounted(intrinsic_rewards)
+        intrinsic_rewards = self.utils.discounted(intrinsic_rewards).detach()
         intrinsic_advantage = intrinsic_rewards - in_value          
         
         # Getting overall advantages
