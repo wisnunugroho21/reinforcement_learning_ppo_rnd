@@ -34,5 +34,5 @@ python rl_ppo_rnd_cartpole_pytorch.py
 ## Future development
 
 I really want to adapt this code to Tensorflow  
-But i think it's best to wait for Tensorflow 2.0 to be fully release
+But I think it's better to wait for Tensorflow 2.0 to be fully released
 
