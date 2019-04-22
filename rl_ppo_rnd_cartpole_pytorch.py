@@ -167,13 +167,13 @@ class Agent:
         dist_entropy = torch.mean(self.utils.entropy(action_probs))
         
         # Discounting external reward and getting external advantages
-        external_rewards = self.utils.discounted(rewards).detach() 
+        external_rewards = self.utils.discounted(rewards).detach()
         external_advantage = external_rewards - ex_value
                     
         # Discounting internal reward and getting internal advantages
         intrinsic_rewards = (state_target - state_pred).pow(2).sum(1)
         intrinsic_rewards = self.utils.discounted(intrinsic_rewards).detach()
-        intrinsic_advantage = intrinsic_rewards - in_value      
+        intrinsic_advantage = intrinsic_rewards - in_value          
         
         # Getting overall advantages
         advantages = (external_advantage + intrinsic_advantage).detach()
@@ -185,13 +185,13 @@ class Agent:
         forward_loss = (forward_loss * mask).sum() / torch.max(mask.sum(), torch.Tensor([1]).to(device))
         
         # Finding Intrinsic Value Function Loss by using Clipped Rewards Value
-        in_vpredclipped = in_old_value + torch.clamp(in_value - in_old_value, -self.eps_clip, self.eps_clip)
+        in_vpredclipped = in_old_value + torch.clamp(in_value - in_old_value, -self.eps_clip, self.eps_clip) # Minimize the difference between old value and new value
         in_vf_losses1 = (intrinsic_rewards - in_value).pow(2)
         in_vf_losses2 = (intrinsic_rewards - in_vpredclipped).pow(2)
         critic_int_loss = torch.mean(torch.min(in_vf_losses1, in_vf_losses2))
         
         # Finding External Value Function Loss by using Clipped Rewards Value
-        ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.eps_clip, self.eps_clip)
+        ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.eps_clip, self.eps_clip) # Minimize the difference between old value and new value
         ex_vf_losses1 = (external_rewards - ex_value).pow(2)
         ex_vf_losses2 = (external_rewards - ex_vpredclipped).pow(2)
         critic_ext_loss = torch.mean(torch.min(ex_vf_losses1, ex_vf_losses2))
@@ -201,7 +201,7 @@ class Agent:
 
         # Finding the ratio (pi_theta / pi_theta__old):  
         logprobs = self.utils.logprob(action_probs, old_actions) 
-        old_logprobs = self.utils.logprob(old_action_probs, old_actions).detach() 
+        old_logprobs = self.utils.logprob(old_action_probs, old_actions).detach()
         
         # Finding Surrogate Loss:
         ratios = torch.exp(logprobs - old_logprobs)

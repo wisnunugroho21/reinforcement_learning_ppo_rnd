@@ -205,7 +205,7 @@ class Agent:
 
         # Finding the ratio (pi_theta / pi_theta__old):  
         logprobs = self.utils.logprob(action_probs, old_actions) 
-        old_logprobs = self.utils.logprob(old_action_probs, old_actions)
+        old_logprobs = self.utils.logprob(old_action_probs, old_actions).detach()
         
         # Finding Surrogate Loss:
         ratios = torch.exp(logprobs - old_logprobs)
@@ -218,7 +218,7 @@ class Agent:
         loss = pg_loss - (critic_loss * self.vf_loss_coef) + (dist_entropy * self.entropy_coef) - forward_loss 
         loss = loss * -1
         
-        return loss         
+        return loss        
       
     def act(self, state):
         state = torch.FloatTensor(state).to(device)      
