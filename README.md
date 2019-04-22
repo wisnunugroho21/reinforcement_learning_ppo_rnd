@@ -31,13 +31,8 @@ After you clone the project, enter the folder and run following script in cmd/te
 python rl_ppo_rnd_cartpole_pytorch.py
 ```
 
-## Having a weird results ??
-
-I have also experienced it. At first i get best reward in rows. But when i running this project again, i will get worst rewards.  
-I still don't know why this happen
-
 ## Future development
 
 I really want to adapt this code to Tensorflow  
-But i think it's best to wait for Tensorflow 2.0 to be fully release
+But I think it's better to wait for Tensorflow 2.0 to be fully released
 
