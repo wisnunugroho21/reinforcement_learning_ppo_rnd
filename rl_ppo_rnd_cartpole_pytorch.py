@@ -95,6 +95,14 @@ class Memory:
 class Utils:
     def __init__(self):
         self.gamma = 0.95
+
+    # Categorical Distribution is used for Discrete Action Environment
+    # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
+    
+    # If you want to create Agent for Continous Action Environment, you must find the proper Distribution for it (Some people use Multivariate Gaussian Distribution)
+    # and making the neural network output directly the action, not probability (Deterministic policy).
+    
+    # This link may will help you : https://www.reddit.com/r/learnmachinelearning/comments/8gp7ze/rl_in_continuous_action_space_how_to_predict_the/
     
     def sample(self, datas):
         distribution = Categorical(datas)      
@@ -170,7 +178,7 @@ class Agent:
         external_rewards = self.utils.discounted(rewards).detach()
         external_advantage = external_rewards - ex_value
                     
-        # Discounting internal reward and getting internal advantages
+        # Finding and discounting internal reward, then getting internal advantages
         intrinsic_rewards = (state_target - state_pred).pow(2).sum(1)
         intrinsic_rewards = self.utils.discounted(intrinsic_rewards).detach()
         intrinsic_advantage = intrinsic_rewards - in_value          
@@ -186,25 +194,25 @@ class Agent:
         
         # Finding Intrinsic Value Function Loss by using Clipped Rewards Value
         in_vpredclipped = in_old_value + torch.clamp(in_value - in_old_value, -self.eps_clip, self.eps_clip) # Minimize the difference between old value and new value
-        in_vf_losses1 = (intrinsic_rewards - in_value).pow(2)
-        in_vf_losses2 = (intrinsic_rewards - in_vpredclipped).pow(2)
+        in_vf_losses1 = (intrinsic_rewards - in_value).pow(2) #Mean Squared Error
+        in_vf_losses2 = (intrinsic_rewards - in_vpredclipped).pow(2) #Mean Squared Error
         critic_int_loss = torch.mean(torch.min(in_vf_losses1, in_vf_losses2))
         
         # Finding External Value Function Loss by using Clipped Rewards Value
         ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.eps_clip, self.eps_clip) # Minimize the difference between old value and new value
-        ex_vf_losses1 = (external_rewards - ex_value).pow(2)
-        ex_vf_losses2 = (external_rewards - ex_vpredclipped).pow(2)
+        ex_vf_losses1 = (external_rewards - ex_value).pow(2) #Mean Squared Error
+        ex_vf_losses2 = (external_rewards - ex_vpredclipped).pow(2) #Mean Squared Error
         critic_ext_loss = torch.mean(torch.min(ex_vf_losses1, ex_vf_losses2))
         
         # Getting overall critic loss
         critic_loss = critic_ext_loss + critic_int_loss
 
-        # Finding the ratio (pi_theta / pi_theta__old):  
+        # Finding the logprobs and old_logprobs:    
         logprobs = self.utils.logprob(action_probs, old_actions) 
         old_logprobs = self.utils.logprob(old_action_probs, old_actions).detach()
         
-        # Finding Surrogate Loss:
-        ratios = torch.exp(logprobs - old_logprobs)
+        # Finding Surrogate Loss for actor:
+        ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs
         surr1 = ratios * advantages
         surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
         pg_loss = torch.mean(torch.min(surr1, surr2))        
@@ -220,6 +228,7 @@ class Agent:
         state = torch.FloatTensor(state).to(device)      
         action_probs, _, _, _, _ = self.policy_old(state)
         
+        # Sample the action
         action = self.utils.sample(action_probs)        
         self.memory.save_actions(action)   
         
@@ -268,8 +277,7 @@ def main():
         
     render = False
     n_update = 1
-    #############################################    
-            
+    ############################################# 
     ppo = Agent(state_dim, action_dim) 
     
     if torch.cuda.is_available() :
@@ -312,6 +320,7 @@ def main():
         if i_episode % n_update == 0 and i_episode != 0:
             ppo.update()
             
+        # plot the rewards and times for every 100 eps
         if i_episode % 100 == 0 and i_episode != 0:
             plot(batch_rewards)
             plot(batch_times)
@@ -324,7 +333,8 @@ def main():
                 
             batch_rewards = []
             batch_times = []
-            
+
+    # Final plot for rewards and times
     print('========== Final ==========')
     plot(rewards)
     plot(times)    
