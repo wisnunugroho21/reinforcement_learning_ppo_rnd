@@ -36,3 +36,4 @@ python rl_ppo_rnd_cartpole_pytorch.py
 I really want to adapt this code to Tensorflow  
 But I think it's better to wait for Tensorflow 2.0 to be fully released
 
+For now, I focused on how to implement this project on Continous Action Environment (pendulum, etc), then on more difficult environment (Atari games, Roboco, etc)
