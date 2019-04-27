@@ -100,7 +100,7 @@ class Utils:
     # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
     
     # If you want to create Agent for Continous Action Environment, you must find the proper Distribution for it (Some people use Multivariate Gaussian Distribution)
-    # This link may will help you : https://www.reddit.com/r/learnmachinelearning/comments/8gp7ze/rl_in_continuous_action_space_how_to_predict_the/ and https://ai.stackexchange.com/questions/4085/policy-gradients-for-multiple-continuous-actions
+    # This link may will help you : https://datascience.stackexchange.com/questions/37434/policy-based-rl-method-how-do-continuous-actions-look-like and https://ai.stackexchange.com/questions/4085/policy-gradients-for-multiple-continuous-actions
     
     def sample(self, datas):
         distribution = Categorical(datas)      
