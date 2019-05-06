@@ -170,7 +170,7 @@ class Agent:
         state_target = state_target.detach() #Don't update target state value
                 
         # Getting entropy from the action probability
-        dist_entropy = torch.mean(self.utils.entropy(action_probs))
+        dist_entropy = self.utils.entropy(action_probs).mean()
         
         # Discounting external reward and getting external advantages
         external_rewards = self.utils.discounted(rewards).detach()
@@ -194,13 +194,13 @@ class Agent:
         in_vpredclipped = in_old_value + torch.clamp(in_value - in_old_value, -self.eps_clip, self.eps_clip) # Minimize the difference between old value and new value
         in_vf_losses1 = (intrinsic_rewards - in_value).pow(2) #Mean Squared Error
         in_vf_losses2 = (intrinsic_rewards - in_vpredclipped).pow(2) #Mean Squared Error
-        critic_int_loss = torch.mean(torch.min(in_vf_losses1, in_vf_losses2))
+        critic_int_loss = torch.min(in_vf_losses1, in_vf_losses2).mean()
         
         # Finding External Value Function Loss by using Clipped Rewards Value
         ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.eps_clip, self.eps_clip) # Minimize the difference between old value and new value
         ex_vf_losses1 = (external_rewards - ex_value).pow(2) #Mean Squared Error
         ex_vf_losses2 = (external_rewards - ex_vpredclipped).pow(2) #Mean Squared Error
-        critic_ext_loss = torch.mean(torch.min(ex_vf_losses1, ex_vf_losses2))
+        critic_ext_loss = torch.min(ex_vf_losses1, ex_vf_losses2).mean()
         
         # Getting overall critic loss
         critic_loss = critic_ext_loss + critic_int_loss
@@ -213,7 +213,7 @@ class Agent:
         ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs
         surr1 = ratios * advantages
         surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-        pg_loss = torch.mean(torch.min(surr1, surr2))        
+        pg_loss = torch.min(surr1, surr2).mean()        
         
         # We need to maximaze Policy Loss to make agent always find Better Rewards
         # and minimize Critic Loss and Forward Loss to sharpen their prediction skill
