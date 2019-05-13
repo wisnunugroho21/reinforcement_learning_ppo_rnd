@@ -336,6 +336,7 @@ def main():
                 
             batch_rewards = []
             batch_times = []
+            
 
     # Final plot for rewards and times
     print('========== Final ==========')
