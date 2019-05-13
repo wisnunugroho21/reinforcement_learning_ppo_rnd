@@ -102,9 +102,6 @@ class Utils:
     # Categorical Distribution is used for Discrete Action Environment
     # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
     
-    # If you want to create Agent for Continous Action Environment, you must find the proper Distribution for it (Some people use Multivariate Gaussian Distribution)
-    # This link may will help you : https://datascience.stackexchange.com/questions/37434/policy-based-rl-method-how-do-continuous-actions-look-like and https://ai.stackexchange.com/questions/4085/policy-gradients-for-multiple-continuous-actions
-    
     def sample(self, datas):
         distribution = Categorical(datas)      
         return distribution.sample().float().to(device)

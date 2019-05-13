@@ -3,7 +3,7 @@ from gym.envs.registration import register
     
 import torch
 import torch.nn as nn
-from torch.distributions import Categorical
+from torch.distributions.multivariate_normal import MultivariateNormal
 import matplotlib.pyplot as plt
 import numpy as np
 from keras.utils import to_categorical
@@ -24,7 +24,7 @@ class Model(nn.Module):
                 nn.Linear(32, 32),
                 nn.ReLU(),
                 nn.Linear(32, action_dim),
-                nn.Softmax()
+                nn.Tanh()
               ).float().to(device)
         
         # critic
@@ -73,6 +73,9 @@ class Memory:
         self.next_states = []
         
     def save_eps(self, state, reward, next_states, done):
+        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
+        next_states = torch.FloatTensor(next_states.reshape(1, -1)).to(device)
+        
         self.rewards.append(reward)
         self.states.append(state)
         self.dones.append(done)
@@ -93,22 +96,25 @@ class Memory:
         del self.next_states[:]
         
 class Utils:
-    def __init__(self):
+    def __init__(self, action_dim):
         self.gamma = 0.95
+        self.diagonal = torch.full((action_dim,), 0.01).float().to(device)
+        
+    # MultiVariable Normal Distribution is used for continous action space
+    # The distribution need mean and standard deviation
+    # The neural network output the mean of distribution 
+    # The standard deviation is assigned by parameter
 
-    # Categorical Distribution is used for Discrete Action Environment
-    # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
-    
-    def sample(self, datas):
-        distribution = Categorical(datas)      
+    def sample(self, datas):   
+        distribution = MultivariateNormal(datas, torch.diag(self.diagonal))   
         return distribution.sample().float().to(device)
         
-    def entropy(self, datas):
-        distribution = Categorical(datas)            
+    def entropy(self, datas):      
+        distribution = MultivariateNormal(datas, torch.diag(self.diagonal))       
         return distribution.entropy().float().to(device)
       
-    def logprob(self, datas, value_data):
-        distribution = Categorical(datas)
+    def logprob(self, datas, value_data):      
+        distribution = MultivariateNormal(datas, torch.diag(self.diagonal))         
         return distribution.log_prob(value_data).float().to(device)      
       
     def normalize(self, data):
@@ -145,18 +151,19 @@ class Agent:
         self.entropy_coef = 0.01
         self.vf_loss_coef = 1
         self.update_proportion = 0.25
+        self.target_kl = 0.1
         
         self.policy = Model(state_dim, action_dim)
-        self.policy_old = Model(state_dim, action_dim) 
-        
+        self.policy_old = Model(state_dim, action_dim)         
         self.policy_optimizer = torch.optim.Adam(self.policy.parameters()) 
+        
         self.memory = Memory()
-        self.utils = Utils()        
+        self.utils = Utils(action_dim)        
         
     def save_eps(self, state, reward, next_states, done):
         self.memory.save_eps(state, reward, next_states, done)
         
-    def get_loss(self, old_states, old_actions, rewards, old_next_states, dones):      
+    def get_loss(self, old_states, old_actions, rewards):      
         action_probs, in_value, ex_value, state_pred, state_target = self.policy(old_states)  
         old_action_probs, in_old_value, ex_old_value, _, _ = self.policy_old(old_states)
         
@@ -165,6 +172,10 @@ class Agent:
         in_old_value = in_old_value.detach()
         ex_old_value = ex_old_value.detach()
         state_target = state_target.detach() #Don't update target state value
+        
+        #Reshaping back
+        state_pred, state_target = state_pred.squeeze(1), state_target.squeeze(1)
+        in_value, ex_value, in_old_value, ex_old_value = in_value.squeeze(1), ex_value.squeeze(1), in_old_value.squeeze(1), ex_old_value.squeeze(1)
                 
         # Getting entropy from the action probability
         dist_entropy = self.utils.entropy(action_probs).mean()
@@ -217,7 +228,9 @@ class Agent:
         loss = pg_loss - (critic_loss * self.vf_loss_coef) + (dist_entropy * self.entropy_coef) - forward_loss 
         loss = loss * -1
         
-        return loss         
+        approx_kl = 0.5 * (logprobs - old_logprobs).pow(2).mean()
+        
+        return loss, approx_kl     
       
     def act(self, state):
         state = torch.FloatTensor(state).to(device)      
@@ -231,15 +244,17 @@ class Agent:
         
     def update(self):        
         # Convert list in tensor
-        old_states = torch.FloatTensor(self.memory.states).to(device).detach()
-        old_actions = torch.FloatTensor(self.memory.actions).to(device).detach()
-        old_next_states = torch.FloatTensor(self.memory.next_states).to(device).detach()
-        dones = torch.FloatTensor(self.memory.dones).to(device).detach() 
+        old_states = torch.stack(self.memory.states).to(device).detach()
+        old_actions = torch.stack(self.memory.actions).to(device).detach()
         rewards = torch.FloatTensor(self.memory.rewards).to(device).detach()
                 
         # Optimize policy for K epochs:
-        for _ in range(self.K_epochs):            
-            loss = self.get_loss(old_states, old_actions, rewards, old_next_states, dones)
+        for epoch in range(self.K_epochs):            
+            loss, approx_kl = self.get_loss(old_states, old_actions, rewards)            
+            
+            if approx_kl > (1.5 * self.target_kl):
+                print('KL greater than target. Stop update at epoch : ', epoch)
+                break
             
             self.policy_optimizer.zero_grad()
             loss.backward()                    
@@ -265,14 +280,15 @@ def plot(datas):
         
 def main():
     ############## Hyperparameters ##############  
-    env_name = "CartPole-v0"
+    env_name = "Pendulum-v0"
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.n
+    action_dim = env.action_space.shape[0]
         
     render = False
     n_update = 1
-    ############################################# 
+    #############################################    
+            
     ppo = Agent(state_dim, action_dim) 
     
     if torch.cuda.is_available() :
@@ -284,7 +300,8 @@ def main():
     times = []
     batch_times = []
     
-    for i_episode in range(1, 10000):
+    
+    for i_episode in range(1, 100000):
         ############################################
         state = env.reset()
         done = False
@@ -294,7 +311,10 @@ def main():
         
         while not done:
             # Running policy_old:   
-            action = int(ppo.act(state))                        
+            action = ppo.act(state) 
+            action *= 2
+            action = np.array([action])
+            
             state_n, reward, done, _ = env.step(action)
             
             total_reward += reward
@@ -315,7 +335,6 @@ def main():
         if i_episode % n_update == 0 and i_episode != 0:
             ppo.update()
             
-        # plot the rewards and times for every 100 eps
         if i_episode % 100 == 0 and i_episode != 0:
             plot(batch_rewards)
             plot(batch_times)
@@ -328,8 +347,7 @@ def main():
                 
             batch_rewards = []
             batch_times = []
-
-    # Final plot for rewards and times
+            
     print('========== Final ==========')
     plot(rewards)
     plot(times)    
