@@ -149,6 +149,7 @@ class Agent:
         self.entropy_coef = 0.01
         self.vf_loss_coef = 1
         self.update_proportion = 0.25
+        self.target_kl = 0.1
         
         self.policy = Model(state_dim, action_dim)
         self.policy_old = Model(state_dim, action_dim) 
@@ -160,7 +161,7 @@ class Agent:
     def save_eps(self, state, reward, next_states, done):
         self.memory.save_eps(state, reward, next_states, done)
         
-    def get_loss(self, old_states, old_actions, rewards, old_next_states, dones):      
+    def get_loss(self, old_states, old_actions, rewards):      
         action_probs, in_value, ex_value, state_pred, state_target = self.policy(old_states)  
         old_action_probs, in_old_value, ex_old_value, _, _ = self.policy_old(old_states)
         
@@ -219,9 +220,12 @@ class Agent:
         # We need to maximaze Policy Loss to make agent always find Better Rewards
         # and minimize Critic Loss and Forward Loss to sharpen their prediction skill
         loss = pg_loss - (critic_loss * self.vf_loss_coef) + (dist_entropy * self.entropy_coef) - forward_loss 
-        loss = loss * -1
+        loss = loss * -1        
         
-        return loss        
+        # Approx KL to choose whether we must continue the gradient descent
+        approx_kl = 0.5 * (logprobs - old_logprobs).pow(2).mean()
+        
+        return loss, approx_kl       
       
     def act(self, state):
         state = torch.FloatTensor(state).to(device)      
@@ -242,8 +246,12 @@ class Agent:
         rewards = torch.FloatTensor(self.memory.rewards).to(device).detach()
                 
         # Optimize policy for K epochs:
-        for _ in range(self.K_epochs):            
-            loss = self.get_loss(old_states, old_actions, rewards, old_next_states, dones)
+        for epoch in range(self.K_epochs):            
+            loss, approx_kl = self.get_loss(old_states, old_actions, rewards)            
+            
+            if approx_kl > (1.5 * self.target_kl):
+                print('KL greater than target. Stop update at epoch : ', epoch)
+                break
             
             self.policy_optimizer.zero_grad()
             loss.backward()                    
