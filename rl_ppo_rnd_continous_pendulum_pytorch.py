@@ -228,6 +228,7 @@ class Agent:
         loss = pg_loss - (critic_loss * self.vf_loss_coef) + (dist_entropy * self.entropy_coef) - forward_loss 
         loss = loss * -1
         
+        # Approx KL to choose whether we must continue the gradient descent or not
         approx_kl = 0.5 * (logprobs - old_logprobs).pow(2).mean()
         
         return loss, approx_kl     
@@ -252,6 +253,7 @@ class Agent:
         for epoch in range(self.K_epochs):            
             loss, approx_kl = self.get_loss(old_states, old_actions, rewards)            
             
+            # If Approx KL greater than target, we must stop backward
             if approx_kl > (1.5 * self.target_kl):
                 print('KL greater than target. Stop update at epoch : ', epoch)
                 break
@@ -287,9 +289,9 @@ def main():
         
     render = False
     n_update = 1
-    #############################################    
-            
+    #############################################  
     ppo = Agent(state_dim, action_dim) 
+    #############################################
     
     if torch.cuda.is_available() :
         print('Using GPU')
@@ -298,8 +300,7 @@ def main():
     batch_rewards = []
     
     times = []
-    batch_times = []
-    
+    batch_times = []    
     
     for i_episode in range(1, 100000):
         ############################################
@@ -312,7 +313,10 @@ def main():
         while not done:
             # Running policy_old:   
             action = ppo.act(state) 
-            action *= 2
+
+            # The action's range is from -2 to 2
+            # Tanh outputting value from -1 to 1. So, we just multiple the value with 2
+            action *= 2 
             action = np.array([action])
             
             state_n, reward, done, _ = env.step(action)
