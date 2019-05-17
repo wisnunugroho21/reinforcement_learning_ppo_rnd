@@ -98,6 +98,7 @@ class Memory:
 class Utils:
     def __init__(self, action_dim):
         self.gamma = 0.95
+        self.lam = 0.95
         self.diagonal = torch.full((action_dim,), 0.01).float().to(device)
         
     # MultiVariable Normal Distribution is used for continous action space
@@ -143,6 +144,17 @@ class Utils:
         # Finding Q Values
         q_values = reward + (1 - done) * self.gamma * value_function(next_state)           
         return q_values
+      
+    def compute_GAE(self, values, rewards, next_value, done):
+        gae = 0
+        returns = []
+        
+        for step in reversed(range(len(rewards))):   
+            delta = rewards[step] + self.gamma * next_value[step] * (1 - done[step]) - values[step]
+            gae = delta + self.lam * gae
+            returns.append(gae.detach())
+            
+        return torch.stack(returns)
         
 class Agent:  
     def __init__(self, state_dim, action_dim):        
@@ -151,7 +163,7 @@ class Agent:
         self.entropy_coef = 0.01
         self.vf_loss_coef = 1
         self.update_proportion = 0.25
-        self.target_kl = 0.1
+        self.target_kl = 0.01
         
         self.policy = Model(state_dim, action_dim)
         self.policy_old = Model(state_dim, action_dim)         
@@ -163,9 +175,10 @@ class Agent:
     def save_eps(self, state, reward, next_states, done):
         self.memory.save_eps(state, reward, next_states, done)
         
-    def get_loss(self, old_states, old_actions, rewards):      
+    def get_loss(self, old_states, old_actions, rewards, old_next_states, dones):      
         action_probs, in_value, ex_value, state_pred, state_target = self.policy(old_states)  
         old_action_probs, in_old_value, ex_old_value, _, _ = self.policy_old(old_states)
+        _, next_in_value, next_ex_value, _, _ = self.policy_old(old_next_states)
         
         # Don't update old value
         old_action_probs = old_action_probs.detach()
@@ -176,18 +189,20 @@ class Agent:
         #Reshaping back
         state_pred, state_target = state_pred.squeeze(1), state_target.squeeze(1)
         in_value, ex_value, in_old_value, ex_old_value = in_value.squeeze(1), ex_value.squeeze(1), in_old_value.squeeze(1), ex_old_value.squeeze(1)
+        next_in_value, next_ex_value = next_in_value.squeeze(1), next_ex_value.squeeze(1)
                 
         # Getting entropy from the action probability
         dist_entropy = self.utils.entropy(action_probs).mean()
         
         # Discounting external reward and getting external advantages
-        external_rewards = self.utils.discounted(rewards).detach()
+        external_rewards = rewards.detach()
+        external_rewards = self.utils.compute_GAE(ex_value, rewards, next_ex_value, dones).detach()
         external_advantage = external_rewards - ex_value
                     
         # Finding and discounting internal reward, then getting internal advantages
-        intrinsic_rewards = (state_target - state_pred).pow(2).sum(1)
-        intrinsic_rewards = self.utils.discounted(intrinsic_rewards).detach()
-        intrinsic_advantage = intrinsic_rewards - in_value          
+        intrinsic_rewards = (state_target - state_pred).pow(2).sum(1).detach()
+        intrinsic_rewards = self.utils.compute_GAE(in_value, rewards, next_in_value, dones).detach()
+        intrinsic_advantage = intrinsic_rewards - in_value           
         
         # Getting overall advantages
         advantages = (external_advantage + intrinsic_advantage).detach()
@@ -228,7 +243,6 @@ class Agent:
         loss = pg_loss - (critic_loss * self.vf_loss_coef) + (dist_entropy * self.entropy_coef) - forward_loss 
         loss = loss * -1
         
-        # Approx KL to choose whether we must continue the gradient descent or not
         approx_kl = 0.5 * (logprobs - old_logprobs).pow(2).mean()
         
         return loss, approx_kl     
@@ -244,16 +258,17 @@ class Agent:
         return action.item() 
         
     def update(self):        
-        # Convert list in tensor
+        # Convert list in tensor        
         old_states = torch.stack(self.memory.states).to(device).detach()
         old_actions = torch.stack(self.memory.actions).to(device).detach()
-        rewards = torch.FloatTensor(self.memory.rewards).to(device).detach()
+        old_next_states = torch.stack(self.memory.next_states).to(device).detach()
+        dones = torch.FloatTensor(self.memory.dones).to(device).detach() 
+        rewards = torch.FloatTensor(self.memory.rewards).to(device).detach()  
                 
         # Optimize policy for K epochs:
         for epoch in range(self.K_epochs):            
-            loss, approx_kl = self.get_loss(old_states, old_actions, rewards)            
+            loss, approx_kl = self.get_loss(old_states, old_actions, rewards, old_next_states, dones)            
             
-            # If Approx KL greater than target, we must stop backward
             if approx_kl > (1.5 * self.target_kl):
                 print('KL greater than target. Stop update at epoch : ', epoch)
                 break
@@ -289,9 +304,9 @@ def main():
         
     render = False
     n_update = 1
-    #############################################  
+    #############################################    
+            
     ppo = Agent(state_dim, action_dim) 
-    #############################################
     
     if torch.cuda.is_available() :
         print('Using GPU')
@@ -300,7 +315,8 @@ def main():
     batch_rewards = []
     
     times = []
-    batch_times = []    
+    batch_times = []
+    
     
     for i_episode in range(1, 100000):
         ############################################
@@ -313,10 +329,7 @@ def main():
         while not done:
             # Running policy_old:   
             action = ppo.act(state) 
-
-            # The action's range is from -2 to 2
-            # Tanh outputting value from -1 to 1. So, we just multiple the value with 2
-            action *= 2 
+            action *= 2
             action = np.array([action])
             
             state_n, reward, done, _ = env.step(action)
