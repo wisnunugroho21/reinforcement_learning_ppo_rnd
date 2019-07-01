@@ -59,6 +59,12 @@ class Model(nn.Module):
                 nn.ReLU(),
                 nn.Linear(16, 10)
               ).float().to(device)
+
+        self.actor_layer.apply(self.init_weights)
+        self.value_in_layer.apply(self.init_weights)
+        self.value_ex_layer.apply(self.init_weights)
+        self.state_predict_layer.apply(self.init_state_predict_weights)
+        self.state_target_layer.apply(self.init_state_target_weights)
         
     def forward(self, state):
         return self.actor_layer(state), self.value_in_layer(state), self.value_ex_layer(state), self.state_predict_layer(state), self.state_target_layer(state)
