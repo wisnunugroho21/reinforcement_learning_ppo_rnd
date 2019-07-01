@@ -341,12 +341,12 @@ def plot(datas):
         
 def main():
     ############## Hyperparameters ##############
-    using_google_drive = True
-    load_weight_from_drive = True
-    training_mode = False
+    using_google_drive = True # If you're using Google Colab and want to save the model to your GDrive, set this to True
+    load_weight_from_drive = True # If you're want to load the model, set this to True
+    training_mode = False # If you want to train the model, set this to True. But set this otherwise if you only want to test it
     
-    render = True
-    n_update = 1
+    render = True # If you want to display the image. Turn this off if you run this in Google Collab
+    n_update = 1 # How many episode before you update the model
     #############################################         
     env_name = "Pong-v0"
     env = gym.make(env_name)
@@ -357,10 +357,9 @@ def main():
     ppo = Agent(state_dim, action_dim)  
     ############################################# 
     
-    if using_google_drive:
-        if load_weight_from_drive:
-            ppo.load_weights()
-            print('Weight Loaded')
+    if load_weight_from_drive:
+        ppo.load_weights()
+        print('Weight Loaded')
     
     if torch.cuda.is_available() :
         print('Using GPU')
