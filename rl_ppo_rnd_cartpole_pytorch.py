@@ -24,7 +24,7 @@ class Model(nn.Module):
                 nn.Linear(32, 32),
                 nn.ReLU(),
                 nn.Linear(32, action_dim),
-                nn.Softmax()
+                nn.Softmax(-1)
               ).float().to(device)
         
         # critic
@@ -45,20 +45,47 @@ class Model(nn.Module):
               ).float().to(device)
         
         self.state_predict_layer = nn.Sequential(
-                nn.Linear(state_dim, 16),
+                nn.Linear(state_dim, 32),
                 nn.ReLU(),
-                nn.Linear(16, 16),
+                nn.Linear(32, 32),
                 nn.ReLU(),
-                nn.Linear(16, 10)
+                nn.Linear(32, 10)
               ).float().to(device)
         
         self.state_target_layer = nn.Sequential(
-                nn.Linear(state_dim, 16),
+                nn.Linear(state_dim, 32),
                 nn.ReLU(),
-                nn.Linear(16, 16),
+                nn.Linear(32, 32),
                 nn.ReLU(),
-                nn.Linear(16, 10)
+                nn.Linear(32, 10)
               ).float().to(device)
+        
+        self.actor_layer.apply(self.init_weights)
+        self.value_in_layer.apply(self.init_weights)
+        self.value_ex_layer.apply(self.init_weights)
+        self.state_predict_layer.apply(self.init_state_predict_weights)
+        self.state_target_layer.apply(self.init_state_target_weights)
+        
+    def init_weights(self, m):
+        for name, param in m.named_parameters():
+            if 'bias' in name:
+               nn.init.constant_(param, 0.01)
+            elif 'weight' in name:
+                nn.init.kaiming_normal_(param, mode = 'fan_in', nonlinearity = 'relu')
+
+    def init_state_predict_weights(self, m):
+        for name, param in m.named_parameters():
+            if 'bias' in name:
+               nn.init.constant_(param, 0.01)
+            elif 'weight' in name:
+                nn.init.constant_(param, 1)
+
+    def init_state_target_weights(self, m):
+        for name, param in m.named_parameters():
+            if 'bias' in name:
+               nn.init.constant_(param, 1)
+            elif 'weight' in name:
+                nn.init.constant_(param, 0)
         
     def forward(self, state):
         return self.actor_layer(state), self.value_in_layer(state), self.value_ex_layer(state), self.state_predict_layer(state), self.state_target_layer(state)
