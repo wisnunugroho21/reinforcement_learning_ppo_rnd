@@ -57,6 +57,7 @@ class Model(nn.Module):
                 nn.Linear(64, 10)
               ).float().to(device)
         
+        # Init wieghts to make training faster
         self.extractor.apply(self.init_weights)       
         self.actor_layer.apply(self.init_weights)
         self.value_in_layer.apply(self.init_weights)
@@ -161,6 +162,10 @@ class Utils:
         return discounted_datas
       
     def prepro(self, I):
+
+        # Crop the image and convert it to Grayscale
+        # For more information : https://medium.com/@dhruvp/how-to-write-a-neural-network-to-play-pong-from-scratch-956b57d4f6e0
+
         """ prepro 210x160x3 uint8 frame into 6400 (80x80) 1D float vector """
         I = I[35:195] # crop
         I = I[::2,::2,0] # downsample by factor of 2
@@ -168,10 +173,7 @@ class Utils:
         I[I == 109] = 0 # erase background (background type 2)
         I[I != 0] = 1 # everything else (paddles, ball) just set to 1
         
-        X = I.astype(np.float32).ravel()   
-        Y = np.expand_dims(X, axis=0)
-        #print(Y.shape)
-        
+        X = I.astype(np.float32).ravel() # Combine items in 1 array         
         return X
       
     def q_values(self, reward, next_value, done, value_function):
@@ -181,6 +183,7 @@ class Utils:
         return q_values
       
     def compute_GAE(self, values, rewards, next_value, done):
+        # Computing the General Advantages Estimations
         gae = 0
         returns = []
         
@@ -300,6 +303,7 @@ class Agent:
         for epoch in range(self.K_epochs):   
             loss, approx_kl = self.get_loss(old_states, old_actions, rewards, old_next_states, dones)          
             
+            # If approx KL greater than target, stop update
             if approx_kl > (1.5 * self.target_kl):
                 print('KL greater than target. Stop update at epoch : ', epoch)
                 break
@@ -336,21 +340,22 @@ def plot(datas):
     print('Avg :', np.mean(datas))
         
 def main():
+    ############## Hyperparameters ##############
     using_google_drive = True
     load_weight_from_drive = True
     training_mode = False
     
     render = True
     n_update = 1
-    ############## Hyperparameters ##############        
+    #############################################         
     env_name = "Pong-v0"
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
         
-    utils = Utils()    
-    ############################################# 
+    utils = Utils()     
     ppo = Agent(state_dim, action_dim)  
+    ############################################# 
     
     if using_google_drive:
         if load_weight_from_drive:
