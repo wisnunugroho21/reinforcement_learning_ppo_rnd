@@ -1,3 +1,5 @@
+from google.colab import drive
+
 import gym
 from gym.envs.registration import register
     
@@ -57,7 +59,10 @@ class Model(nn.Module):
                 nn.Linear(64, 10)
               ).float().to(device)
         
-        # Init wieghts to make training faster
+                
+    # Init wieghts to make training faster
+    # But don't init weight if you load weight from file
+    def lets_init_weights(self):
         self.extractor.apply(self.init_weights)       
         self.actor_layer.apply(self.init_weights)
         self.value_in_layer.apply(self.init_weights)
@@ -319,12 +324,16 @@ class Agent:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), 'actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), 'old_actor_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('old_actor_pong_ppo_rnd.pth'))  
+        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))  
+        
+    def lets_init_weights(self):
+        self.policy.lets_init_weights()
+        self.policy_old.lets_init_weights()
         
 def plot(datas):
     print('----------')
@@ -341,12 +350,13 @@ def plot(datas):
         
 def main():
     ############## Hyperparameters ##############
-    using_google_drive = True # If you're using Google Colab and want to save the model to your GDrive, set this to True
-    load_weight_from_drive = True # If you're want to load the model, set this to True
-    training_mode = False # If you want to train the model, set this to True. But set this otherwise if you only want to test it
+    using_google_drive = True # If you using Google Colab and want to save the model to your GDrive, set this to True
+    load_weight_from_drive = False # If you want to load the model, set this to True
+    training_mode = True # If you want to train the model, set this to True. But set this otherwise if you only want to test it
     
-    render = True # If you want to display the image. Turn this off if you run this in Google Collab
+    render = False # If you want to display the image. Turn this off if you run this in Google Collab
     n_update = 1 # How many episode before you update the model
+    n_plot_batch = 100 # How many episode you want to plot the result
     #############################################         
     env_name = "Pong-v0"
     env = gym.make(env_name)
@@ -356,6 +366,9 @@ def main():
     utils = Utils()     
     ppo = Agent(state_dim, action_dim)  
     ############################################# 
+    
+    if using_google_drive:
+        drive.mount('/test')
     
     if load_weight_from_drive:
         ppo.load_weights()
@@ -369,6 +382,9 @@ def main():
     
     times = []
     batch_times = []
+    
+    if not load_weight_from_drive:
+        ppo.lets_init_weights()
     
     for i_episode in range(1, 100000):
         ############################################
@@ -408,11 +424,10 @@ def main():
                 ppo.update()
                 print('Agent has been updated')
 
-                if using_google_drive:
-                    ppo.save_weights()
-                    print('Weights saved')
+                ppo.save_weights()
+                print('Weights saved')                    
             
-        if i_episode % 100 == 0 and i_episode != 0:
+        if i_episode % n_plot_batch == 0 and i_episode != 0:
             plot(batch_rewards)
             plot(batch_times)
             
