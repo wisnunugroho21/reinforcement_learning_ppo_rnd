@@ -373,6 +373,9 @@ def main():
     if load_weight_from_drive:
         ppo.load_weights()
         print('Weight Loaded')
+    else :
+        ppo.lets_init_weights()
+        print('Init Weight')
     
     if torch.cuda.is_available() :
         print('Using GPU')
@@ -381,10 +384,7 @@ def main():
     batch_rewards = []
     
     times = []
-    batch_times = []
-    
-    if not load_weight_from_drive:
-        ppo.lets_init_weights()
+    batch_times = []        
     
     for i_episode in range(1, 100000):
         ############################################
