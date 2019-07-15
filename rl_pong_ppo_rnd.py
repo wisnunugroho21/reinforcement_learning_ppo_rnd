@@ -351,7 +351,8 @@ def plot(datas):
 def main():
     ############## Hyperparameters ##############
     using_google_drive = True # If you using Google Colab and want to save the model to your GDrive, set this to True
-    load_weight_from_drive = False # If you want to load the model, set this to True
+    load_weights = False # If you want to load the model, set this to True
+    save_weights = True # If you want to save the model, set this to True
     training_mode = True # If you want to train the model, set this to True. But set this otherwise if you only want to test it
     
     render = False # If you want to display the image. Turn this off if you run this in Google Collab
@@ -370,7 +371,7 @@ def main():
     if using_google_drive:
         drive.mount('/test')
     
-    if load_weight_from_drive:
+    if load_weights:
         ppo.load_weights()
         print('Weight Loaded')
     else :
@@ -424,8 +425,9 @@ def main():
                 ppo.update()
                 print('Agent has been updated')
 
-                ppo.save_weights()
-                print('Weights saved')                    
+                if save_weights:
+                    ppo.save_weights()
+                    print('Weights saved')
             
         if i_episode % n_plot_batch == 0 and i_episode != 0:
             plot(batch_rewards)
