@@ -330,26 +330,46 @@ def main():
         print('Env FrozenLakeNotSlippery has not yet initialized. \nInitializing now...')
     except:
         print('Env FrozenLakeNotSlippery has been initialized')
-        
-    ############## Hyperparameters ##############  
+
+    ############## Hyperparameters ##############
+    using_google_drive = True # If you using Google Colab and want to save the model to your GDrive, set this to True
+    load_weights = False # If you want to load the model, set this to True
+    save_weights = True # If you want to save the model, set this to True
+    training_mode = True # If you want to train the model, set this to True. But set this otherwise if you only want to test it
+    
+    render = False # If you want to display the image. Turn this off if you run this in Google Collab
+    n_update = 1 # How many episode before you update the model
+    n_plot_batch = 100 # How many episode you want to plot the result
+    #############################################         
     env_name = "FrozenLakeNotSlippery-v0"
     env = gym.make(env_name)
     state_dim = env.observation_space.n
     action_dim = env.action_space.n
         
-    render = False
-    n_update = 1
-    #############################################    
-            
-    ppo = Agent(state_dim, action_dim)
+    utils = Utils()     
+    ppo = Agent(state_dim, action_dim)  
+    ############################################# 
+    
+    if using_google_drive:
+        drive.mount('/test')
+    
+    if load_weights:
+        ppo.load_weights()
+        print('Weight Loaded')
+    else :
+        ppo.lets_init_weights()
+        print('Init Weight')
+    
+    if torch.cuda.is_available() :
+        print('Using GPU')
     
     rewards = []   
     batch_rewards = []
     
     times = []
-    batch_times = []
+    batch_times = []        
     
-    for i_episode in range(1, 10000):
+    for i_episode in range(1, 100000):
         ############################################
         state = env.reset()
         done = False
@@ -390,7 +410,7 @@ def main():
             # Saving state and reward:
             next_state_val = to_categorical(state_n, num_classes = state_dim)
             ppo.save_eps(state_val, reward, next_state_val, done) 
-            state = state_n       
+            state = state_n      
             
             if render:
                 env.render()
@@ -400,12 +420,18 @@ def main():
                 batch_times.append(t)
                 break        
         
-        # update after n episodes
-        if i_episode % n_update == 0 and i_episode != 0:
-            ppo.update()
+        if training_mode:
+            # update after n episodes
+            if i_episode % n_update == 0 and i_episode != 0:
+                ppo.update()
+                print('Agent has been updated')
+
+                if save_weights:
+                    ppo.save_weights()
+                    print('Weights saved')
             
-        # plot the rewards and times for every 100 eps
-        if i_episode % 100 == 0 and i_episode != 0:
+        # plot the rewards and times for every n_plot_batch eps
+        if i_episode % n_plot_batch == 0 and i_episode != 0:
             plot(batch_rewards)
             plot(batch_times)
             
@@ -417,11 +443,11 @@ def main():
                 
             batch_rewards = []
             batch_times = []
-
-    # Final plot for rewards and times
+            
+     # Final plot for rewards and times
     print('========== Final ==========')
     plot(rewards)
-    plot(times)
+    plot(times)    
             
 if __name__ == '__main__':
     main()

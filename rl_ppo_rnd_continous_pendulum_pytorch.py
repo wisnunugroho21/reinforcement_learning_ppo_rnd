@@ -302,17 +302,34 @@ def plot(datas):
     print('Avg :', np.mean(datas))
         
 def main():
-    ############## Hyperparameters ##############  
+    ############## Hyperparameters ##############
+    using_google_drive = True # If you using Google Colab and want to save the model to your GDrive, set this to True
+    load_weights = False # If you want to load the model, set this to True
+    save_weights = True # If you want to save the model, set this to True
+    training_mode = True # If you want to train the model, set this to True. But set this otherwise if you only want to test it
+    
+    render = False # If you want to display the image. Turn this off if you run this in Google Collab
+    n_update = 1 # How many episode before you update the model
+    n_plot_batch = 100 # How many episode you want to plot the result
+    #############################################         
     env_name = "Pendulum-v0"
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
         
-    render = False
-    n_update = 1
-    #############################################    
-            
-    ppo = Agent(state_dim, action_dim) 
+    utils = Utils()     
+    ppo = Agent(state_dim, action_dim)  
+    ############################################# 
+    
+    if using_google_drive:
+        drive.mount('/test')
+    
+    if load_weights:
+        ppo.load_weights()
+        print('Weight Loaded')
+    else :
+        ppo.lets_init_weights()
+        print('Init Weight')
     
     if torch.cuda.is_available() :
         print('Using GPU')
@@ -321,12 +338,11 @@ def main():
     batch_rewards = []
     
     times = []
-    batch_times = []
-    
+    batch_times = []        
     
     for i_episode in range(1, 100000):
         ############################################
-        state = env.reset()
+        state = env.reset()  
         done = False
         total_reward = 0
         t = 0
@@ -334,16 +350,16 @@ def main():
         
         while not done:
             # Running policy_old:   
-            action = ppo.act(state) 
-            action *= 2
-            action = np.array([action])
-            
-            state_n, reward, done, _ = env.step(action)
+            action = int(ppo.act(state)) 
+            action *= 2           
+            state_n, reward, done, _ = env.step(action) 
             
             total_reward += reward
             t += 1
              
-            ppo.save_eps(state, reward, state_n, done) 
+            if training_mode:
+                ppo.save_eps(state, reward, state_n, done) 
+                
             state = state_n       
             
             if render:
@@ -354,11 +370,18 @@ def main():
                 batch_times.append(t)
                 break        
         
-        # update after n episodes
-        if i_episode % n_update == 0 and i_episode != 0:
-            ppo.update()
+        if training_mode:
+            # update after n episodes
+            if i_episode % n_update == 0 and i_episode != 0:
+                ppo.update()
+                print('Agent has been updated')
+
+                if save_weights:
+                    ppo.save_weights()
+                    print('Weights saved')
             
-        if i_episode % 100 == 0 and i_episode != 0:
+        # plot the rewards and times for every n_plot_batch eps
+        if i_episode % n_plot_batch == 0 and i_episode != 0:
             plot(batch_rewards)
             plot(batch_times)
             
@@ -371,6 +394,7 @@ def main():
             batch_rewards = []
             batch_times = []
             
+     # Final plot for rewards and times
     print('========== Final ==========')
     plot(rewards)
     plot(times)    
