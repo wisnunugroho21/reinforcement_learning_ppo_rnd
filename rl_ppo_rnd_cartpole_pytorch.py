@@ -186,8 +186,6 @@ class Agent:
         
         self.ex_advantages_coef = 2
         self.in_advantages_coef = 1
-        self.ex_critic_coef = 1
-        self.in_critic_coef = 1
         
         self.policy = Model(state_dim, action_dim)
         self.policy_old = Model(state_dim, action_dim) 
