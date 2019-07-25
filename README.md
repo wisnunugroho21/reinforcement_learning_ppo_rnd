@@ -37,3 +37,7 @@ I really want to adapt this code to Tensorflow
 But I think it's better to wait for Tensorflow 2.0 to be fully released
 
 For now, I focused on how to implement this project on More difficult environment (Atari games, Roboco, etc)
+
+## Contributing
+
+This project is far from finished. If you want to fix, contribute, or give an idea, just write it in issues
