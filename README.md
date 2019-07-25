@@ -40,4 +40,4 @@ For now, I focused on how to implement this project on More difficult environmen
 
 ## Contributing
 
-This project is far from finished. If you want to fix, contribute, or give an idea, just write it in issues
+This project is far from finish. If you want to fix, contribute, or give an idea, just write it in issues
