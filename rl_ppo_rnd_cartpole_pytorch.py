@@ -55,7 +55,7 @@ class PPO_Model(nn.Module):
             if 'bias' in name:
                nn.init.constant_(param, 0.01)
             elif 'weight' in name:
-                nn.init.kaiming_normal_(param, mode = 'fan_in', nonlinearity = 'relu')
+                nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'relu')
         
     def forward(self, state, is_act = False):
         if is_act: 
@@ -384,10 +384,14 @@ class Agent:
     def save_weights(self):
         torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
         torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.rnd_predict.state_dict(), '/test/Your Folder/rnd_predict_pong_ppo_rnd.pth')
+        torch.save(self.rnd_target.state_dict(), '/test/Your Folder/rnd_target_pong_ppo_rnd.pth')
         
     def load_weights(self):
         self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/test/Your Folder/ld_actor_pong_ppo_rnd.pth'))  
+        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))
+        self.rnd_predict.load_state_dict(torch.load('/test/Your Folder/rnd_predict_pong_ppo_rnd.pth'))        
+        self.rnd_target.load_state_dict(torch.load('/test/Your Folder/rnd_target_pong_ppo_rnd.pth'))   
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -470,7 +474,7 @@ def main():
     
     if using_google_drive:
         from google.colab import drive
-        drive.mount('/wisnunugroho21')
+        drive.mount('/test')
     
     if load_weights:
         agent.load_weights()

@@ -382,12 +382,16 @@ class Agent:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), '/wisnunugroho21/My Drive/frozenlake/actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), '/wisnunugroho21/My Drive/frozenlake/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.rnd_predict.state_dict(), '/test/Your Folder/rnd_predict_pong_ppo_rnd.pth')
+        torch.save(self.rnd_target.state_dict(), '/test/Your Folder/rnd_target_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('/wisnunugroho21/My Drive/frozenlake/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/wisnunugroho21/My Drive/frozenlake/old_actor_pong_ppo_rnd.pth'))  
+        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))
+        self.rnd_predict.load_state_dict(torch.load('/test/Your Folder/rnd_predict_pong_ppo_rnd.pth'))        
+        self.rnd_target.load_state_dict(torch.load('/test/Your Folder/rnd_target_pong_ppo_rnd.pth'))  
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -488,7 +492,7 @@ def main():
     n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
     n_rnd_update = 32 # How many episode before you update the RND
-    n_episode = 3000 # How many episode you want to run
+    n_episode = 5000 # How many episode you want to run
     #############################################         
     env_name = "FrozenLakeNotSlippery-v0"
     env = gym.make(env_name)
@@ -501,7 +505,7 @@ def main():
     
     if using_google_drive:
         from google.colab import drive
-        drive.mount('/wisnunugroho21')
+        drive.mount('/test')
     
     if load_weights:
         agent.load_weights()
@@ -545,10 +549,10 @@ def main():
         if reward_threshold:
             if len(batch_solved_reward) == 100:            
                 if np.mean(batch_solved_reward) >= reward_threshold :              
-                    for reward in batch_times:
+                    for reward in batch_rewards:
                         rewards.append(reward)
 
-                    for time in batch_rewards:
+                    for time in batch_times:
                         times.append(time)
                         
                     for rg in batch_reach_goal:
@@ -570,10 +574,10 @@ def main():
             plot(batch_times)
             plot(batch_reach_goal)
             
-            for reward in batch_times:
+            for reward in batch_rewards:
                 rewards.append(reward)
                 
-            for time in batch_rewards:
+            for time in batch_times:
                 times.append(time)
                 
             for rg in batch_reach_goal:

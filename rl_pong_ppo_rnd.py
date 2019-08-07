@@ -6,52 +6,47 @@ import torch.nn as nn
 from torch.distributions import Categorical
 import matplotlib.pyplot as plt
 import numpy as np
-from keras.utils import to_categorical
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")  
 dataType = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-
+      
 class PPO_Model(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(PPO_Model, self).__init__()
         
-        self.extractor_layer = nn.Sequential(
-                nn.Linear(state_dim, 128),
-                nn.ELU()).float().to(device)
-        
-        self.memory_cell_layer = nn.LSTM(128, 128).float().to(device)        
+        # Actor
         self.actor_layer = nn.Sequential(
-                nn.Linear(128, 512),
+                nn.Linear(6400, 512),
                 nn.ELU(),
-                nn.Linear(512, 128),
+                nn.Linear(512, 512),
                 nn.ELU(),
-                nn.Linear(128, action_dim),
+                nn.Linear(512, 64),
+                nn.ELU(),
+                nn.Linear(64, action_dim),
                 nn.Softmax(-1)
               ).float().to(device)
         
         # Intrinsic Critic
         self.value_in_layer = nn.Sequential(
-                nn.Linear(128, 128),
+                nn.Linear(6400, 512),
                 nn.ELU(),
-                nn.Linear(128, 512),
+                nn.Linear(512, 512),
                 nn.ELU(),
-                nn.Linear(512, 128),
+                nn.Linear(512, 64),
                 nn.ELU(),
-                nn.Linear(128, 1)
+                nn.Linear(64, 1)
               ).float().to(device)
         
         # External Critic
         self.value_ex_layer = nn.Sequential(
-                nn.Linear(128, 128),
+               nn.Linear(6400, 512),
                 nn.ELU(),
-                nn.Linear(128, 512),
+                nn.Linear(512, 512),
                 nn.ELU(),
-                nn.Linear(512, 128),
+                nn.Linear(512, 64),
                 nn.ELU(),
-                nn.Linear(128, 1)
+                nn.Linear(64, 1)
               ).float().to(device)
-
-        self.hiddens = (torch.zeros(1, 1, 128).float().to(device), torch.zeros(1, 1, 128).float().to(device))
         
     # Init wieghts to make training faster
     # But don't init weight if you load weight from file
@@ -59,47 +54,33 @@ class PPO_Model(nn.Module):
         self.actor_layer.apply(self.init_weights)
         self.value_in_layer.apply(self.init_weights)
         self.value_ex_layer.apply(self.init_weights)
-        self.memory_cell_layer.apply(self.init_weights)
-        self.extractor_layer.apply(self.init_weights)
         
     def init_weights(self, m):
         for name, param in m.named_parameters():
             if 'bias' in name:
                nn.init.constant_(param, 0.01)
             elif 'weight' in name:
-                nn.init.kaiming_normal_(param, mode = 'fan_in', nonlinearity = 'relu')
-
-    def reset_hidden(self):
-        del self.hiddens
-        self.hiddens = (torch.zeros(1, 1, 128).float().to(device), torch.zeros(1, 1, 128).float().to(device))
+                nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'relu')
         
     def forward(self, state, is_act = False):
-        if is_act:
-            x = self.extractor_layer(state)
-            x, self.hiddens = self.memory_cell_layer(x.view(1, 1, 128), self.hiddens)
-            self.hiddens = (self.hiddens[0].detach(), self.hiddens[1].detach())
-                
-            return self.actor_layer(x)
-
-        else:   
-            x = self.extractor_layer(state)
-            x, _ = self.memory_cell_layer(x.view(len(state), 1, 128), (torch.zeros(1, 1, 128).float().to(device), torch.zeros(1, 1, 128).float().to(device)))
-                
-            return self.actor_layer(x), self.value_in_layer(state), self.value_ex_layer(state)
-
+        if is_act: 
+            return self.actor_layer(state)
+        else:
+            return self.actor_layer(state), self.value_in_layer(state), self.value_ex_layer(state)
+      
 class RND_predictor_Model(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(RND_predictor_Model, self).__init__()
 
         # State Predictor
         self.state_predict_layer = nn.Sequential(
-                nn.Linear(state_dim, 128),
+                nn.Linear(6400, 512),
                 nn.ELU(),
-                nn.Linear(128, 512),
+                nn.Linear(512, 512),
                 nn.ELU(),
-                nn.Linear(512, 128),
+                nn.Linear(512, 64),
                 nn.ELU(),
-                nn.Linear(128, 1)
+                nn.Linear(64, 10)
               ).float().to(device)
 
     def init_state_predict_weights(self, m):
@@ -121,13 +102,13 @@ class RND_target_Model(nn.Module):
 
         # State Target
         self.state_target_layer = nn.Sequential(
-                nn.Linear(state_dim, 128),
+                nn.Linear(6400, 512),
                 nn.ELU(),
-                nn.Linear(128, 512),
+                nn.Linear(512, 512),
                 nn.ELU(),
-                nn.Linear(512, 128),
+                nn.Linear(512, 64),
                 nn.ELU(),
-                nn.Linear(128, 1)
+                nn.Linear(64, 10)
               ).float().to(device)
               
     def init_state_target_weights(self, m):
@@ -238,6 +219,21 @@ class Utils:
             returns.append(gae.detach())
             
         return torch.stack(returns)
+
+    def prepro(self, I):
+
+        # Crop the image and convert it to Grayscale
+        # For more information : https://medium.com/@dhruvp/how-to-write-a-neural-network-to-play-pong-from-scratch-956b57d4f6e0
+
+        """ prepro 210x160x3 uint8 frame into 6400 (80x80) 1D float vector """
+        I = I[35:195] # crop
+        I = I[::2,::2,0] # downsample by factor of 2
+        I[I == 144] = 0 # erase background (background type 1)
+        I[I == 109] = 0 # erase background (background type 2)
+        I[I != 0] = 1 # everything else (paddles, ball) just set to 1
+        
+        X = I.astype(np.float32).ravel() # Combine items in 1 array         
+        return X
         
 class Agent:  
     def __init__(self, state_dim, action_dim):        
@@ -245,12 +241,12 @@ class Agent:
         self.value_clip = 1       
         self.entropy_coef = 0.01
         self.vf_loss_coef = 1
-        self.target_kl = 1
+        self.target_kl = 0.1
 
         self.PPO_epochs = 5
         self.RND_epochs = 4
         
-        self.ex_advantages_coef = 3
+        self.ex_advantages_coef = 1
         self.in_advantages_coef = 1
         
         self.policy = PPO_Model(state_dim, action_dim)
@@ -312,7 +308,7 @@ class Agent:
         external_advantage = self.utils.compute_GAE(ex_value, rewards, next_ex_value, dones).detach()
                     
         # Computing internal reward, then getting internal general advantages estimator
-        intrinsic_rewards = (state_target - state_pred).pow(2).detach()
+        intrinsic_rewards = (state_target - state_pred).pow(2).mean(-1).detach()
         intrinsic_advantage = self.utils.compute_GAE(in_value, intrinsic_rewards, next_in_value, dones)
         intrinsic_advantage = self.utils.normalize(intrinsic_advantage).detach()
         
@@ -405,19 +401,21 @@ class Agent:
 
         # Clear state, action, reward in memory    
         self.memory.clearMemory()
-        self.policy.reset_hidden()
-        self.policy_old.reset_hidden()
         
         # Copy new weights into old policy:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), '/wisnunugroho21/My Drive/RL_Breakout_PPO_RND/actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), '/wisnunugroho21/My Drive/RL_Breakout_PPO_RND/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), 'actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), 'old_actor_pong_ppo_rnd.pth')
+        torch.save(self.rnd_predict.state_dict(), 'rnd_predict_pong_ppo_rnd.pth')
+        torch.save(self.rnd_target.state_dict(), 'rnd_target_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('/wisnunugroho21/My Drive/RL_Breakout_PPO_RND/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/wisnunugroho21/My Drive/RL_Breakout_PPO_RND/old_actor_pong_ppo_rnd.pth'))  
+        self.policy.load_state_dict(torch.load('actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('old_actor_pong_ppo_rnd.pth'))
+        self.rnd_predict.load_state_dict(torch.load('rnd_predict_pong_ppo_rnd.pth'))        
+        self.rnd_target.load_state_dict(torch.load('rnd_target_pong_ppo_rnd.pth'))          
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -437,21 +435,25 @@ def plot(datas):
     print('Avg :', np.mean(datas))
 
 def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_update):
+    utils = Utils()
     ############################################
-    state = env.reset()           
+    state = env.reset() 
+    state = utils.prepro(state)
+
     done = False
     total_reward = 0
     t = 0
     ############################################
     
     while not done:
-        # Running policy_old:            
+        # Running policy_old: 
         action = int(agent.act(state))
         state_n, reward, done, info = env.step(action)
+        state_n = utils.prepro(state_n)
         
         t += 1
-        t_rnd += 1                           
-        total_reward += reward    
+        t_rnd += 1          
+        total_reward += reward
           
         if training_mode:
             agent.save_eps(state, reward, state_n, done) 
@@ -472,24 +474,23 @@ def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_updat
     
 def main():
     ############## Hyperparameters ##############
-    using_google_drive = True # If you using Google Colab and want to save the agent to your GDrive, set this to True
+    using_google_drive = False # If you using Google Colab and want to save the agent to your GDrive, set this to True
     load_weights = False # If you want to load the agent, set this to True
-    save_weights = True # If you want to save the agent, set this to True
-    training_mode = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
+    save_weights = False # If you want to save the agent, set this to True
+    training_mode = False # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
     reward_threshold = None # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     
-    render = False # If you want to display the image. Turn this off if you run this in Google Collab
+    render = True # If you want to display the image. Turn this off if you run this in Google Collab
     n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
-    n_rnd_update = 128 # How many episode before you update the RND
+    n_rnd_update = 256 # How many episode before you update the RND
     n_episode = 20000 # How many episode you want to run
     #############################################         
-    env_name = "Pong-ram-v0"
+    env_name = "Pong-v0"
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.n
-        
-    utils = Utils()     
+    action_dim = env.action_space.n       
+         
     agent = Agent(state_dim, action_dim)  
     ############################################# 
     
