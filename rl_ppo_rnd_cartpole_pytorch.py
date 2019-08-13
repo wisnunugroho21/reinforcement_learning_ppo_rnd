@@ -154,7 +154,7 @@ class Memory:
 class Utils:
     def __init__(self):
         self.gamma = 0.95
-        self.lam = 0.95
+        self.lam = 0.99
 
     # Categorical Distribution is used for Discrete Action Environment
     # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
@@ -214,7 +214,8 @@ class Utils:
 class Agent:  
     def __init__(self, state_dim, action_dim):        
         self.policy_clip = 0.2 
-        self.value_clip = 1       
+        self.value_ex_clip = 1
+        self.value_in_clip = 5        
         self.entropy_coef = 0.01
         self.vf_loss_coef = 1
         self.target_kl = 0.1
@@ -227,10 +228,10 @@ class Agent:
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001) 
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.00146) 
 
         self.rnd_predict = RND_predictor_Model(state_dim, action_dim)
-        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.001)
+        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.00146)
         self.rnd_target = RND_target_Model(state_dim, action_dim)
 
         self.memory = Memory()
@@ -291,17 +292,17 @@ class Agent:
         # Getting overall advantages
         advantages = (self.ex_advantages_coef * external_advantage + self.in_advantages_coef * intrinsic_advantage).detach()
         
-        # Finding Intrinsic Value Function Loss by using Clipped Rewards Value
-        in_vpredclipped = in_old_value + torch.clamp(in_value - in_old_value, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
-        in_vf_losses1 = (intrinsic_rewards - in_value).pow(2) #Mean Squared Error
-        in_vf_losses2 = (intrinsic_rewards - in_vpredclipped).pow(2) #Mean Squared Error
-        critic_int_loss = torch.max(in_vf_losses1, in_vf_losses2).mean()
-        
-        # Finding External Value Function Loss by using Clipped Rewards Value
-        ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
+        # Getting External critic loss by using Clipped critic value
+        ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.value_ex_clip, self.value_ex_clip) # Minimize the difference between old value and new value
         ex_vf_losses1 = (external_rewards - ex_value).pow(2) # Mean Squared Error
         ex_vf_losses2 = (external_rewards - ex_vpredclipped).pow(2) # Mean Squared Error
-        critic_ext_loss = torch.max(ex_vf_losses1, ex_vf_losses2).mean()
+        critic_ext_loss = torch.min(ex_vf_losses1, ex_vf_losses2).mean()
+
+        # Getting Intrinsic critic loss
+        in_vpredclipped = in_old_value + torch.clamp(in_value - in_old_value, -self.value_in_clip, self.value_in_clip) # Minimize the difference between old value and new value
+        in_vf_losses1 = (intrinsic_rewards - in_value).pow(2) #Mean Squared Error
+        in_vf_losses2 = (intrinsic_rewards - in_vpredclipped).pow(2) #Mean Squared Error
+        critic_int_loss = torch.min(in_vf_losses1, in_vf_losses2).mean()
         
         # Getting overall critic loss
         critic_loss = critic_ext_loss + critic_int_loss
