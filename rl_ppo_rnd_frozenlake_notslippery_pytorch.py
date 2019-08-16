@@ -1,3 +1,5 @@
+from google.colab import drive
+
 import gym
 from gym.envs.registration import register
     
@@ -213,13 +215,13 @@ class Utils:
         
 class Agent:  
     def __init__(self, state_dim, action_dim):        
-        self.policy_clip = 0.2 
-        self.value_clip = 1       
-        self.entropy_coef = 0.01
+        self.policy_clip = 0.1 
+        self.value_ex_clip = 1      
+        self.entropy_coef = 0.001
         self.vf_loss_coef = 1
         self.target_kl = 0.1
 
-        self.PPO_epochs = 5
+        self.PPO_epochs = 4
         self.RND_epochs = 4
         
         self.ex_advantages_coef = 2
@@ -227,10 +229,10 @@ class Agent:
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001) 
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.0001) 
 
         self.rnd_predict = RND_predictor_Model(state_dim, action_dim)
-        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.001)
+        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.0001)
         self.rnd_target = RND_target_Model(state_dim, action_dim)
 
         self.memory = Memory()
@@ -243,9 +245,9 @@ class Agent:
         self.memory.save_observation(obs)
 
     # Loss for RND 
-    def get_rnd_loss(self, old_states):
-        state_pred = self.rnd_predict(old_states)
-        state_target = self.rnd_target(old_states)
+    def get_rnd_loss(self, obs):
+        state_pred = self.rnd_predict(obs)
+        state_target = self.rnd_target(obs)
         
         # Don't update target state value
         state_target = state_target.detach()
@@ -260,8 +262,8 @@ class Agent:
         old_action_probs, in_old_value, ex_old_value = self.policy_old(old_states)
         _, next_in_value, next_ex_value = self.policy(old_next_states)
         
-        state_pred = self.rnd_predict(old_states)
-        state_target = self.rnd_target(old_states)
+        state_pred = self.rnd_predict(old_next_states)
+        state_target = self.rnd_target(old_next_states)
         
         # Don't update old value
         old_action_probs = old_action_probs.detach()
@@ -286,22 +288,18 @@ class Agent:
         # Computing internal reward, then getting internal general advantages estimator
         intrinsic_rewards = (state_target - state_pred).pow(2).mean(-1).detach()
         intrinsic_advantage = self.utils.compute_GAE(in_value, intrinsic_rewards, next_in_value, dones)
-        intrinsic_advantage = self.utils.normalize(intrinsic_advantage).detach()
         
         # Getting overall advantages
-        advantages = (self.ex_advantages_coef * external_advantage + self.in_advantages_coef * intrinsic_advantage).detach()
+        advantages = (self.ex_advantages_coef * external_advantage + self.in_advantages_coef * intrinsic_advantage).detach()        
         
-        # Finding Intrinsic Value Function Loss by using Clipped Rewards Value
-        in_vpredclipped = in_old_value + torch.clamp(in_value - in_old_value, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
-        in_vf_losses1 = (intrinsic_rewards - in_value).pow(2) #Mean Squared Error
-        in_vf_losses2 = (intrinsic_rewards - in_vpredclipped).pow(2) #Mean Squared Error
-        critic_int_loss = torch.max(in_vf_losses1, in_vf_losses2).mean()
-        
-        # Finding External Value Function Loss by using Clipped Rewards Value
-        ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
+        # Getting External critic loss by using Clipped critic value
+        ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.value_ex_clip, self.value_ex_clip) # Minimize the difference between old value and new value
         ex_vf_losses1 = (external_rewards - ex_value).pow(2) # Mean Squared Error
         ex_vf_losses2 = (external_rewards - ex_vpredclipped).pow(2) # Mean Squared Error
-        critic_ext_loss = torch.max(ex_vf_losses1, ex_vf_losses2).mean()
+        critic_ext_loss = torch.min(ex_vf_losses1, ex_vf_losses2).mean()
+
+        # Getting Intrinsic critic loss
+        critic_int_loss = (intrinsic_rewards - in_value).pow(2).mean()
         
         # Getting overall critic loss
         critic_loss = critic_ext_loss + critic_int_loss
@@ -312,13 +310,13 @@ class Agent:
         
         # Finding Surrogate Loss:
         ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs
-        surr1 = ratios * advantages * -1
-        surr2 = torch.clamp(ratios, 1 - self.policy_clip, 1 + self.policy_clip) * advantages * -1
-        pg_loss = torch.max(surr1, surr2).mean()       
+        surr1 = ratios * advantages
+        surr2 = torch.clamp(ratios, 1 - self.policy_clip, 1 + self.policy_clip) * advantages
+        pg_loss = torch.min(surr1, surr2).mean()       
         
         # We need to maximaze Policy Loss to make agent always find Better Rewards
         # and minimize Critic Loss and 
-        loss = pg_loss + (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) 
+        loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss
         
         # Approx KL to choose whether we must continue the gradient descent
         approx_kl = 0.5 * (logprobs - old_logprobs).pow(2).mean()
@@ -338,11 +336,11 @@ class Agent:
     # Update the RND part (the state and predictor)
     def update_rnd(self):
         # Convert list in tensor
-        old_states = torch.FloatTensor(self.memory.observation).to(device).detach()
+        obs = torch.FloatTensor(self.memory.observation).to(device).detach()
         
         # Optimize predictor for K epochs:
         for epoch in range(self.RND_epochs):                        
-            loss = self.get_rnd_loss(old_states)  
+            loss = self.get_rnd_loss(obs)  
             
             self.rnd_predict_optimizer.zero_grad()
             loss.backward()                    
@@ -453,7 +451,7 @@ def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_updat
         if training_mode:
             next_state_val = to_categorical(state_n, num_classes = state_dim)  # One hot encoding for next state   
             agent.save_eps(state_val, reward, next_state_val, done) 
-            agent.save_observation(state_val) 
+            agent.save_observation(next_state_val) 
             
         state = state_n     
         
@@ -492,7 +490,7 @@ def main():
     n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
     n_rnd_update = 32 # How many episode before you update the RND
-    n_episode = 5000 # How many episode you want to run
+    n_episode = 1000 # How many episode you want to run
     #############################################         
     env_name = "FrozenLakeNotSlippery-v0"
     env = gym.make(env_name)
@@ -504,8 +502,7 @@ def main():
     ############################################# 
     
     if using_google_drive:
-        from google.colab import drive
-        drive.mount('/test')
+        drive.mount('/wisnunugroho21')
     
     if load_weights:
         agent.load_weights()
