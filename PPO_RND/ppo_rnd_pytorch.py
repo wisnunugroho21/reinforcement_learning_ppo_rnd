@@ -73,7 +73,7 @@ class RND_predictor_Model(nn.Module):
                 nn.ELU(),
                 nn.Linear(64, 64),
                 nn.ELU(),
-                nn.Linear(64, 10)
+                nn.Linear(64, 4)
               ).float().to(device)
 
     def init_state_predict_weights(self, m):
@@ -99,7 +99,7 @@ class RND_target_Model(nn.Module):
                 nn.ELU(),
                 nn.Linear(64, 64),
                 nn.ELU(),
-                nn.Linear(64, 10)
+                nn.Linear(64, 4)
               ).float().to(device)
               
     def init_state_target_weights(self, m):
@@ -152,9 +152,9 @@ class Memory:
         del self.observation[:]
         
 class Utils:
-    def __init__(self):
-        self.gamma = 0.95
-        self.lam = 0.99
+    def __init__(self, gamma, lam):
+        self.gamma = gamma
+        self.lam = lam
 
     # Categorical Distribution is used for Discrete Action Environment
     # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
@@ -217,7 +217,10 @@ class Agent:
         self.value_ex_clip = 1      
         self.entropy_coef = 0.001
         self.vf_loss_coef = 1
-        self.target_kl = 0.1
+        self.target_kl = 0.5
+
+        self.gamma = 0.95
+        self.lam = 0.99
 
         self.PPO_epochs = 4
         self.RND_epochs = 4
@@ -234,7 +237,7 @@ class Agent:
         self.rnd_target = RND_target_Model(state_dim, action_dim)
 
         self.memory = Memory()
-        self.utils = Utils()        
+        self.utils = Utils(self.gamma, self.lam)        
         
     def save_eps(self, state, reward, next_states, done):
         self.memory.save_eps(state, reward, next_states, done)
@@ -260,7 +263,7 @@ class Agent:
         old_action_probs, in_old_value, ex_old_value = self.policy_old(old_states)
         _, next_in_value, next_ex_value = self.policy(old_next_states)
         
-        #rnd_states = self.utils.normalize(old_states).detach()
+        # We use next state as our observation for RND
         state_pred = self.rnd_predict(old_next_states)
         state_target = self.rnd_target(old_next_states)
         
@@ -314,7 +317,7 @@ class Agent:
         pg_loss = torch.min(surr1, surr2).mean()       
         
         # We need to maximaze Policy Loss to make agent always find Better Rewards
-        # and minimize Critic Loss and 
+        # and minimize Critic Loss
         loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss 
         
         # Approx KL to choose whether we must continue the gradient descent
@@ -409,10 +412,12 @@ def plot(datas):
 
 def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_update):
     ############################################
+
     state = env.reset()           
     done = False
     total_reward = 0
     t = 0
+
     ############################################
     
     while not done:
@@ -422,23 +427,20 @@ def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_updat
         
         t += 1
         t_rnd += 1                           
-        total_reward += reward    
-        
-        # There is a bugs in cartpole env which always giving same rewards, even if the state will make env terminate (done = true)
-        # So, i tweak the reward system
-        # reward will negative if the state will make env terminate (done = true)
-        reward = -100 if done and t < 200 else 1
+        total_reward += reward
           
+        # Save all of eps parameter
         if training_mode:
             agent.save_eps(state, reward, state_n, done) 
-            agent.save_observation(state_n) 
+            agent.save_observation(state_n) # We use next state as our observation for RND
             
         state = state_n     
         
+        # Update RND neural network for every n_rnd_update
         if training_mode:
             if t_rnd == n_rnd_update:
                 agent.update_rnd()
-                #print('RND has been updated')
+                print('RND has been updated')
                 t_rnd = 0
         
         if render:
@@ -448,6 +450,7 @@ def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_updat
     
 def main():
     ############## Hyperparameters ##############
+
     using_google_drive = False # If you using Google Colab and want to save the agent to your GDrive, set this to True
     load_weights = False # If you want to load the agent, set this to True
     save_weights = False # If you want to save the agent, set this to True
@@ -459,14 +462,17 @@ def main():
     n_plot_batch = 100 # How many episode you want to plot the result
     n_rnd_update = 128 # How many episode before you update the RND
     n_episode = 1000 # How many episode you want to run
-    #############################################         
-    env_name = "CartPole-v0"
+
+    ############################################# 
+             
+    env_name = "Env name"
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
         
     utils = Utils()     
     agent = Agent(state_dim, action_dim)  
+
     ############################################# 
     
     if using_google_drive:
@@ -498,16 +504,18 @@ def main():
         batch_rewards.append(total_reward)
         batch_times.append(time)       
         
-        if training_mode:
-            # update after n episodes
+        # Update PPO after n episodes
+        if training_mode:            
             if i_episode % n_update == 0 and i_episode != 0:
                 agent.update_ppo()
-                #print('Agent has been updated')
+                print('Agent has been updated')
 
                 if save_weights:
                     agent.save_weights()
-                    #print('Weights saved')
-                    
+                    print('Weights saved')
+
+        # If rewards has surpass threshold, stop the training because you has reach your goal
+        # OpenAI gym set threshold to benchmark your algorithm and set how fast your algorithm reach threshold            
         if reward_threshold:
             if len(batch_solved_reward) == 100:            
                 if np.mean(batch_solved_reward) >= reward_threshold :              
@@ -527,8 +535,8 @@ def main():
             else:
                 batch_solved_reward.append(total_reward)
             
-        if i_episode % n_plot_batch == 0 and i_episode != 0:
-            # Plot the reward, times for every n_plot_batch
+        # Plot the reward, times for every n_plot_batch
+        if i_episode % n_plot_batch == 0 and i_episode != 0:            
             plot(batch_rewards)
             plot(batch_times)
             
@@ -541,13 +549,13 @@ def main():
             batch_rewards = []
             batch_times = []
 
-            print('========== Cummulative ==========')
             # Plot the reward, times for every episode
+            print('========== Cummulative ==========')            
             plot(rewards)
             plot(times)
             
-    print('========== Final ==========')
-     # Plot the reward, times for every episode
+    # Plot the reward, times for every episode
+    print('========== Final ==========')     
     plot(rewards)
     plot(times) 
             
