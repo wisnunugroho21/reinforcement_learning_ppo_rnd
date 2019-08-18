@@ -50,6 +50,8 @@ Random Network Distillation (RND), a prediction-based method for encouraging rei
 
 RND incentivizes visiting unfamiliar states by measuring how hard it is to predict the output of a fixed random neural network on visited states. In unfamiliar states it’s hard to guess the output, and hence the reward is high. It can be applied to any reinforcement learning algorithm, is simple to implement and efficient to scale. 
 
+You can read full detail of RND in [here](https://openai.com/blog/reinforcement-learning-with-prediction-based-rewards/)
+
 ## Future development
 
 I really want to adapt this code to Tensorflow  
