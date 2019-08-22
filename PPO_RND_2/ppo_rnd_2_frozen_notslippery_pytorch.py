@@ -422,16 +422,16 @@ class Agent:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/old_actor_pong_ppo_rnd.pth')
-        torch.save(self.rnd_predict.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/rnd_predict_pong_ppo_rnd.pth')
-        torch.save(self.rnd_target.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/rnd_target_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.rnd_predict.state_dict(), '/test/Your Folder/rnd_predict_pong_ppo_rnd.pth')
+        torch.save(self.rnd_target.state_dict(), '/test/Your Folder/rnd_target_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/old_actor_pong_ppo_rnd.pth'))
-        self.rnd_predict.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/rnd_predict_pong_ppo_rnd.pth'))        
-        self.rnd_target.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/rnd_target_pong_ppo_rnd.pth'))    
+        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))
+        self.rnd_predict.load_state_dict(torch.load('/test/Your Folder/rnd_predict_pong_ppo_rnd.pth'))        
+        self.rnd_target.load_state_dict(torch.load('/test/Your Folder/rnd_target_pong_ppo_rnd.pth'))     
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()

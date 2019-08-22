@@ -412,16 +412,16 @@ class Agent:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/old_actor_pong_ppo_rnd.pth')
-        torch.save(self.rnd_predict.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/rnd_predict_pong_ppo_rnd.pth')
-        torch.save(self.rnd_target.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/rnd_target_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.rnd_predict.state_dict(), '/test/Your Folder/rnd_predict_pong_ppo_rnd.pth')
+        torch.save(self.rnd_target.state_dict(), '/test/Your Folder/rnd_target_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/old_actor_pong_ppo_rnd.pth'))
-        self.rnd_predict.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/rnd_predict_pong_ppo_rnd.pth'))        
-        self.rnd_target.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/rnd_target_pong_ppo_rnd.pth'))    
+        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))
+        self.rnd_predict.load_state_dict(torch.load('/test/Your Folder/rnd_predict_pong_ppo_rnd.pth'))        
+        self.rnd_target.load_state_dict(torch.load('/test/Your Folder/rnd_target_pong_ppo_rnd.pth'))    
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -507,7 +507,7 @@ def main():
     load_weights = False # If you want to load the agent, set this to True
     save_weights = False # If you want to save the agent, set this to True
     training_mode = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
-    reward_threshold = 195 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
+    reward_threshold = None # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     
     render = False # If you want to display the image. Turn this off if you run this in Google Collab
     n_update = 1 # How many episode before you update the Policy
@@ -519,7 +519,7 @@ def main():
     mean_obs = None
     std_obs = None
     #############################################         
-    env_name = "CartPole-v0"
+    env_name = "Env name"
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
