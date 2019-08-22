@@ -55,7 +55,7 @@ class PPO_Model(nn.Module):
             if 'bias' in name:
                nn.init.constant_(param, 0.01)
             elif 'weight' in name:
-                nn.init.kaiming_normal_(param, mode = 'fan_in', nonlinearity = 'relu')
+                nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'relu')
         
     def forward(self, state, is_act = False):
         if is_act: 
@@ -73,7 +73,7 @@ class RND_predictor_Model(nn.Module):
                 nn.ELU(),
                 nn.Linear(64, 64),
                 nn.ELU(),
-                nn.Linear(64, 10)
+                nn.Linear(64, 4)
               ).float().to(device)
 
     def init_state_predict_weights(self, m):
@@ -99,7 +99,7 @@ class RND_target_Model(nn.Module):
                 nn.ELU(),
                 nn.Linear(64, 64),
                 nn.ELU(),
-                nn.Linear(64, 10)
+                nn.Linear(64, 4)
               ).float().to(device)
               
     def init_state_target_weights(self, m):
@@ -152,9 +152,9 @@ class Memory:
         del self.observation[:]
         
 class Utils:
-    def __init__(self):
-        self.gamma = 0.95
-        self.lam = 0.99
+    def __init__(self, gamma, lam):
+        self.gamma = gamma
+        self.lam = lam
 
     # Categorical Distribution is used for Discrete Action Environment
     # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
@@ -213,14 +213,16 @@ class Utils:
         
 class Agent:  
     def __init__(self, state_dim, action_dim):        
-        self.policy_clip = 0.2 
-        self.value_ex_clip = 1
-        self.value_in_clip = 5       
-        self.entropy_coef = 0.01
+        self.policy_clip = 0.1 
+        self.value_ex_clip = 1      
+        self.entropy_coef = 0.001
         self.vf_loss_coef = 1
-        self.target_kl = 0.1
+        self.target_kl = 0.5
 
-        self.PPO_epochs = 5
+        self.gamma = 0.95
+        self.lam = 0.99
+
+        self.PPO_epochs = 4
         self.RND_epochs = 4
         
         self.ex_advantages_coef = 2
@@ -228,14 +230,14 @@ class Agent:
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.00146) 
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.0001) 
 
         self.rnd_predict = RND_predictor_Model(state_dim, action_dim)
-        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.00146)
+        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.0001)
         self.rnd_target = RND_target_Model(state_dim, action_dim)
 
         self.memory = Memory()
-        self.utils = Utils()        
+        self.utils = Utils(self.gamma, self.lam)        
         
     def save_eps(self, state, reward, next_states, done):
         self.memory.save_eps(state, reward, next_states, done)
@@ -244,9 +246,9 @@ class Agent:
         self.memory.save_observation(obs)
 
     # Loss for RND 
-    def get_rnd_loss(self, old_states):
-        state_pred = self.rnd_predict(old_states)
-        state_target = self.rnd_target(old_states)
+    def get_rnd_loss(self, obs):
+        state_pred = self.rnd_predict(obs)
+        state_target = self.rnd_target(obs)
         
         # Don't update target state value
         state_target = state_target.detach()
@@ -261,8 +263,9 @@ class Agent:
         old_action_probs, in_old_value, ex_old_value = self.policy_old(old_states)
         _, next_in_value, next_ex_value = self.policy(old_next_states)
         
-        state_pred = self.rnd_predict(old_states)
-        state_target = self.rnd_target(old_states)
+        # We use next state as our observation for RND
+        state_pred = self.rnd_predict(old_next_states)
+        state_target = self.rnd_target(old_next_states)
         
         # Don't update old value
         old_action_probs = old_action_probs.detach()
@@ -279,7 +282,7 @@ class Agent:
                 
         # Getting entropy from the action probability
         dist_entropy = self.utils.entropy(action_probs).mean()
-        
+
         # Getting external general advantages estimator
         external_rewards = rewards.detach()
         external_advantage = self.utils.compute_GAE(ex_value, rewards, next_ex_value, dones).detach()
@@ -287,7 +290,6 @@ class Agent:
         # Computing internal reward, then getting internal general advantages estimator
         intrinsic_rewards = (state_target - state_pred).pow(2).mean(-1).detach()
         intrinsic_advantage = self.utils.compute_GAE(in_value, intrinsic_rewards, next_in_value, dones)
-        intrinsic_advantage = self.utils.normalize(intrinsic_advantage).detach()
         
         # Getting overall advantages
         advantages = (self.ex_advantages_coef * external_advantage + self.in_advantages_coef * intrinsic_advantage).detach()
@@ -299,10 +301,7 @@ class Agent:
         critic_ext_loss = torch.min(ex_vf_losses1, ex_vf_losses2).mean()
 
         # Getting Intrinsic critic loss
-        in_vpredclipped = in_old_value + torch.clamp(in_value - in_old_value, -self.value_in_clip, self.value_in_clip) # Minimize the difference between old value and new value
-        in_vf_losses1 = (intrinsic_rewards - in_value).pow(2) #Mean Squared Error
-        in_vf_losses2 = (intrinsic_rewards - in_vpredclipped).pow(2) #Mean Squared Error
-        critic_int_loss = torch.min(in_vf_losses1, in_vf_losses2).mean()
+        critic_int_loss = (intrinsic_rewards - in_value).pow(2).mean()
         
         # Getting overall critic loss
         critic_loss = critic_ext_loss + critic_int_loss
@@ -313,13 +312,13 @@ class Agent:
         
         # Finding Surrogate Loss:
         ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs
-        surr1 = ratios * advantages * -1
-        surr2 = torch.clamp(ratios, 1 - self.policy_clip, 1 + self.policy_clip) * advantages * -1
-        pg_loss = torch.max(surr1, surr2).mean()       
+        surr1 = ratios * advantages
+        surr2 = torch.clamp(ratios, 1 - self.policy_clip, 1 + self.policy_clip) * advantages
+        pg_loss = torch.min(surr1, surr2).mean()       
         
         # We need to maximaze Policy Loss to make agent always find Better Rewards
-        # and minimize Critic Loss and 
-        loss = pg_loss + (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) 
+        # and minimize Critic Loss
+        loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss 
         
         # Approx KL to choose whether we must continue the gradient descent
         approx_kl = 0.5 * (logprobs - old_logprobs).pow(2).mean()
@@ -339,11 +338,11 @@ class Agent:
     # Update the RND part (the state and predictor)
     def update_rnd(self):
         # Convert list in tensor
-        old_states = torch.FloatTensor(self.memory.observation).to(device).detach()
+        obs = torch.FloatTensor(self.memory.observation).to(device).detach()
         
         # Optimize predictor for K epochs:
         for epoch in range(self.RND_epochs):                        
-            loss = self.get_rnd_loss(old_states)  
+            loss = self.get_rnd_loss(obs)  
             
             self.rnd_predict_optimizer.zero_grad()
             loss.backward()                    
@@ -392,7 +391,7 @@ class Agent:
         self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
         self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))
         self.rnd_predict.load_state_dict(torch.load('/test/Your Folder/rnd_predict_pong_ppo_rnd.pth'))        
-        self.rnd_target.load_state_dict(torch.load('/test/Your Folder/rnd_target_pong_ppo_rnd.pth'))  
+        self.rnd_target.load_state_dict(torch.load('/test/Your Folder/rnd_target_pong_ppo_rnd.pth'))   
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -409,99 +408,71 @@ def plot(datas):
     
     print('Max :', np.max(datas))
     print('Min :', np.min(datas))
-    print('Avg :', np.mean(datas)) 
+    print('Avg :', np.mean(datas))
 
 def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_update):
     ############################################
+
     state = env.reset()           
     done = False
     total_reward = 0
     t = 0
+
     ############################################
-    # Total reward calculation only to used for determined how good your agent to find Goals. but that value will not assign to agent.
-    # More efficient the agent find the goal, more Total reward it will get
-    # agent only get reward from environment.
-    # I set this because i really want to know, How good my agent if it only get reward in finish line
-    cell_visited = []
-    total_reward = 0
-    success_reward = 10
-    fail_reward = 1
-    visit_again_minus_reward = 0.25
-    travel_minus_reward = 0.04
-    ############################################
+    
     while not done:
-        # Running policy_old:   
-        state_val = to_categorical(state, num_classes = state_dim) # One hot encoding for state because it's more efficient for Neural Network
-        action = int(agent.act(state_val))
-        state_n, reward, done, _ = env.step(action)
-        
-        if reward == 0 and done :
-            total_reward -= fail_reward
-
-        elif reward == 1 and done:
-            total_reward += success_reward
-
-        elif state in cell_visited:
-            total_reward -= visit_again_minus_reward
-
-        else:
-            total_reward -= travel_minus_reward  
-            cell_visited.append(state)            
+        # Running policy_old:            
+        action = int(agent.act(state))
+        state_n, reward, done, info = env.step(action)
         
         t += 1
-        t_rnd += 1
+        t_rnd += 1                           
+        total_reward += reward
           
+        # Save all of eps parameter
         if training_mode:
-            next_state_val = to_categorical(state_n, num_classes = state_dim)  # One hot encoding for next state   
-            agent.save_eps(state_val, reward, next_state_val, done) 
-            agent.save_observation(state_val) 
+            agent.save_eps(state, reward, state_n, done) 
+            agent.save_observation(state_n) # We use next state as our observation for RND
             
         state = state_n     
         
+        # Update RND neural network for every n_rnd_update
         if training_mode:
             if t_rnd == n_rnd_update:
                 agent.update_rnd()
-                #print('RND has been updated')
+                print('RND has been updated')
                 t_rnd = 0
         
         if render:
             env.render()
         if done:
-            return total_reward, t, int(reward), t_rnd
-
+            return total_reward, t, t_rnd
+    
 def main():
-    try:
-        register(
-            id='FrozenLakeNotSlippery-v0',
-            entry_point='gym.envs.toy_text:FrozenLakeEnv',
-            kwargs={'map_name' : '4x4', 'is_slippery': False},
-            max_episode_steps=100,
-            reward_threshold=0.8196, # optimum = .8196
-        )
-
-        print('Env FrozenLakeNotSlippery has not yet initialized. \nInitializing now...')
-    except:
-        print('Env FrozenLakeNotSlippery has been initialized')
     ############## Hyperparameters ##############
+
     using_google_drive = False # If you using Google Colab and want to save the agent to your GDrive, set this to True
     load_weights = False # If you want to load the agent, set this to True
     save_weights = False # If you want to save the agent, set this to True
     training_mode = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
-    reward_threshold = None # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to set this off
+    reward_threshold = None # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     
     render = False # If you want to display the image. Turn this off if you run this in Google Collab
     n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
-    n_rnd_update = 32 # How many episode before you update the RND
-    n_episode = 5000 # How many episode you want to run
-    #############################################         
-    env_name = "FrozenLakeNotSlippery-v0"
+    n_rnd_update = 128 # How many episode before you update the RND
+    n_episode = 1000 # How many episode you want to run
+
+    ############################################# 
+             
+    env_name = "Env name"
     env = gym.make(env_name)
-    state_dim = env.observation_space.n
+    state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
         
     utils = Utils()     
     agent = Agent(state_dim, action_dim)  
+
     ############################################# 
     
     if using_google_drive:
@@ -525,20 +496,16 @@ def main():
     times = []
     batch_times = []
     
-    reach_goal = []
-    batch_reach_goal = []
-    
     t_rnd = 0
     
     for i_episode in range(1, n_episode):
-        total_reward, time, r_goal, t_rnd = run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_update)
-        print('Episode {} \t t_reward: {} \t time: {} \t is_reach_goal: {}'.format(i_episode, total_reward, time, bool(r_goal)))
+        total_reward, time, t_rnd = run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_update)
+        print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, total_reward, time))
         batch_rewards.append(total_reward)
-        batch_times.append(time)
-        batch_reach_goal.append(r_goal)      
+        batch_times.append(time)       
         
-        if training_mode:
-            # update after n episodes
+        # Update PPO after n episodes
+        if training_mode:            
             if i_episode % n_update == 0 and i_episode != 0:
                 agent.update_ppo()
                 print('Agent has been updated')
@@ -546,18 +513,17 @@ def main():
                 if save_weights:
                     agent.save_weights()
                     print('Weights saved')
-                    
+
+        # If rewards has surpass threshold, stop the training because you has reach your goal
+        # OpenAI gym set threshold to benchmark your algorithm and set how fast your algorithm reach threshold            
         if reward_threshold:
             if len(batch_solved_reward) == 100:            
                 if np.mean(batch_solved_reward) >= reward_threshold :              
-                    for reward in batch_rewards:
+                    for reward in batch_times:
                         rewards.append(reward)
 
-                    for time in batch_times:
-                        times.append(time)
-                        
-                    for rg in batch_reach_goal:
-                        reach_goal.append(rg)
+                    for time in batch_rewards:
+                        times.append(time)                    
 
                     print('You solved task after {} episode'.format(len(rewards)))
                     break
@@ -569,30 +535,29 @@ def main():
             else:
                 batch_solved_reward.append(total_reward)
             
-        if i_episode % n_plot_batch == 0 and i_episode != 0:
-            # Plot the reward, times, and reach_goal for every n_plot_batch
+        # Plot the reward, times for every n_plot_batch
+        if i_episode % n_plot_batch == 0 and i_episode != 0:            
             plot(batch_rewards)
             plot(batch_times)
-            plot(batch_reach_goal)
             
-            for reward in batch_rewards:
+            for reward in batch_times:
                 rewards.append(reward)
                 
-            for time in batch_times:
+            for time in batch_rewards:
                 times.append(time)
-                
-            for rg in batch_reach_goal:
-                reach_goal.append(rg)
                 
             batch_rewards = []
             batch_times = []
-            batch_reach_goal = []
+
+            # Plot the reward, times for every episode
+            print('========== Cummulative ==========')            
+            plot(rewards)
+            plot(times)
             
-    print('========== Final ==========')
-    # Plot the reward, times, and reach_goal for every episode
+    # Plot the reward, times for every episode
+    print('========== Final ==========')     
     plot(rewards)
     plot(times) 
-    plot(reach_goal) 
             
 if __name__ == '__main__':
     main()
