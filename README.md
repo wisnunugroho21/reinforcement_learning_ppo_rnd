@@ -62,4 +62,4 @@ For now, I focused on how to implement this project on more difficult environmen
 
 ## Contributing
 
-This project is far from finish. Any fix, contribute, or give an idea is very appreciated
+This project is far from finish. Any fix, contribute, or an idea is very appreciated
