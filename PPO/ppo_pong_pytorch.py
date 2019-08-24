@@ -16,9 +16,11 @@ class PPO_Model(nn.Module):
         
         # Actor
         self.actor_layer = nn.Sequential(
-                nn.Linear(state_dim, 64),
+                nn.Linear(state_dim, 640),
                 nn.ELU(),
-                nn.Linear(64, 64),
+                nn.Linear(640, 640),
+                nn.ELU(),
+                nn.Linear(640, 64),
                 nn.ELU(),
                 nn.Linear(64, action_dim),
                 nn.Softmax(-1)
@@ -26,9 +28,11 @@ class PPO_Model(nn.Module):
         
         # Intrinsic Critic
         self.value_layer = nn.Sequential(
-                nn.Linear(state_dim, 64),
+                nn.Linear(state_dim, 640),
                 nn.ELU(),
-                nn.Linear(64, 64),
+                nn.Linear(640, 640),
+                nn.ELU(),
+                nn.Linear(640, 64),
                 nn.ELU(),
                 nn.Linear(64, 1)
               ).float().to(device)
@@ -142,12 +146,7 @@ class Utils:
         return torch.stack(returns)
 
     def prepro(self, I):
-        # Crop the image and convert it to Grayscale
-        # For more information : https://medium.com/@dhruvp/how-to-write-a-neural-network-to-play-pong-from-scratch-956b57d4f6e0
-
-        """ prepro 210x160x3 uint8 frame into 6400 (80x80) 1D float vector """
         I = I[35:195] # crop
-        #I = np.dot(I[...,:3], [0.2989, 0.5870, 0.1140])
         I = I[::2,::2, 0] # downsample by factor of 2
         I[I == 144] = 0 # erase background (background type 1)
         I[I == 109] = 0 # erase background (background type 2)
@@ -159,12 +158,11 @@ class Utils:
 class Agent:  
     def __init__(self, state_dim, action_dim):        
         self.policy_clip = 0.2 
-        self.value_clip = 0.2      
+        self.value_clip = 1      
         self.entropy_coef = 0.01
         self.vf_loss_coef = 1
-        self.target_kl = 1
 
-        self.PPO_epochs = 4
+        self.PPO_epochs = 3
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
@@ -175,9 +173,6 @@ class Agent:
         
     def save_eps(self, state, reward, next_states, done):
         self.memory.save_eps(state, reward, next_states, done)
-        
-    def save_observation(self, obs):
-        self.memory.save_observation(obs)
 
     # Loss for PPO
     def get_loss(self, old_states, old_actions, rewards, old_next_states, dones):      
@@ -218,11 +213,8 @@ class Agent:
         # We need to maximaze Policy Loss to make agent always find Better Rewards
         # and minimize Critic Loss and 
         loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss 
-        
-        # Approx KL to choose whether we must continue the gradient descent
-        approx_kl = 0.5 * (logprobs - old_logprobs).pow(2).mean()
-        
-        return loss, approx_kl       
+                
+        return loss       
       
     def act(self, state):
         state = torch.FloatTensor(state).to(device)      
@@ -247,13 +239,8 @@ class Agent:
                 
         # Optimize policy for K epochs:
         for epoch in range(self.PPO_epochs):
-            loss, approx_kl = self.get_loss(old_states, old_actions, rewards, old_next_states, dones)          
-            
-            # If KL is bigger than threshold, stop update and continue to next episode
-            if approx_kl > (1.5 * self.target_kl):
-                print('KL greater than target. Stop update at epoch : ', epoch + 1)
-                break
-            
+            loss = self.get_loss(old_states, old_actions, rewards, old_next_states, dones)          
+                        
             self.policy_optimizer.zero_grad()
             loss.backward()                    
             self.policy_optimizer.step() 
@@ -265,12 +252,12 @@ class Agent:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), 'actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), 'old_actor_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))   
+        self.policy.load_state_dict(torch.load('actor_pong_ppo_rnd.pth', map_location='cpu'))        
+        self.policy_old.load_state_dict(torch.load('old_actor_pong_ppo_rnd.pth', map_location='cpu'))   
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -305,6 +292,7 @@ def run_episode(env, agent, state_dim, render, training_mode):
         action = int(agent.act(state))
         state_n, reward, done, info = env.step(action)
         state_n = utils.prepro(state_n)
+        state_n = state_n - state
         
         t += 1                       
         total_reward += reward    
@@ -321,18 +309,18 @@ def run_episode(env, agent, state_dim, render, training_mode):
     
 def main():
     ############## Hyperparameters ##############
-    using_google_drive = True # If you using Google Colab and want to save the agent to your GDrive, set this to True
-    load_weights = False # If you want to load the agent, set this to True
-    save_weights = True # If you want to save the agent, set this to True
-    training_mode = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
+    using_google_drive = False # If you using Google Colab and want to save the agent to your GDrive, set this to True
+    load_weights = True # If you want to load the agent, set this to True
+    save_weights = False # If you want to save the agent, set this to True
+    training_mode = False # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
     reward_threshold = None # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     
-    render = False # If you want to display the image. Turn this off if you run this in Google Collab
+    render = True # If you want to display the image. Turn this off if you run this in Google Collab
     n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
-    n_episode = 5000 # How many episode you want to run
+    n_episode = 10000 # How many episode you want to run
     #############################################         
-    env_name = "Env Name"
+    env_name = "Pong-v0"
     env = gym.make(env_name)
     state_dim = 6400
     action_dim = env.action_space.n

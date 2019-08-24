@@ -215,15 +215,15 @@ class Agent:
     def __init__(self, state_dim, action_dim):        
         self.policy_clip = 0.1 
         self.value_ex_clip = 1      
-        self.entropy_coef = 0.001
+        self.entropy_coef = 0.01
         self.vf_loss_coef = 1
-        self.target_kl = 0.5
+        self.target_kl = 1
 
         self.gamma = 0.95
         self.lam = 0.99
 
-        self.PPO_epochs = 4
-        self.RND_epochs = 4
+        self.PPO_epochs = 3
+        self.RND_epochs = 3
         
         self.ex_advantages_coef = 2
         self.in_advantages_coef = 1

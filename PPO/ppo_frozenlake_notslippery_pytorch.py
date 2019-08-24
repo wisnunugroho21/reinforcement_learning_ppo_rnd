@@ -159,17 +159,16 @@ class Utils:
 class Agent:  
     def __init__(self, state_dim, action_dim):        
         self.policy_clip = 0.2 
-        self.value_clip = 0.2      
-        self.entropy_coef = 0.001
+        self.value_clip = 1      
+        self.entropy_coef = 0.01
         self.vf_loss_coef = 1
-        self.target_kl = 0.5
+        self.target_kl = 1
 
         self.PPO_epochs = 4
-        self.RND_epochs = 4
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001)
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.0001)
 
         self.memory = Memory()
         self.utils = Utils()        
@@ -179,19 +178,6 @@ class Agent:
         
     def save_observation(self, obs):
         self.memory.save_observation(obs)
-
-    # Loss for RND 
-    def get_rnd_loss(self, obs):
-        #rnd_states = self.utils.normalize(old_states).detach()
-        state_pred = self.rnd_predict(obs)
-        state_target = self.rnd_target(obs)
-        
-        # Don't update target state value
-        state_target = state_target.detach()
-        
-        # Mean Squared Error Calculation between state and predict
-        forward_loss = (state_target - state_pred).pow(2).mean()
-        return forward_loss
 
     # Loss for PPO
     def get_loss(self, old_states, old_actions, rewards, old_next_states, dones):      
