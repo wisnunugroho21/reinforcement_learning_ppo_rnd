@@ -28,7 +28,8 @@ git clone https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd.git
 After you clone the project, enter the folder and run following script in cmd/terminal :
 
 ```
-python rl_ppo_rnd_cartpole_pytorch.py
+cd reinforcement_learning_ppo_rnd/PPO_RND
+python ppo_rnd_cartpole_pytorch.py
 ```
 
 ## Proximal Policy Optimization
@@ -57,8 +58,8 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 I really want to adapt this code to Tensorflow  
 But I think it's better to wait for Tensorflow 2.0 to be fully released
 
-For now, I focused on how to implement this project on More difficult environment (Atari games, Roboco, etc)
+For now, I focused on how to implement this project on more difficult environment (Atari games, Roboschoo, etc)
 
 ## Contributing
 
-This project is far from finish. If you want to fix, contribute, or give an idea, just write it in issues
+This project is far from finish. Any fix, contribute, or give an idea is very appreciated
