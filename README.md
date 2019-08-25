@@ -58,8 +58,8 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 I really want to adapt this code to Tensorflow  
 But I think it's better to wait for Tensorflow 2.0 to be fully released
 
-For now, I focused on how to implement this project on more difficult environment (Atari games, Roboschoo, etc)
+For now, I focused on how to implement this project on more difficult environment (Atari games, Roboschool, etc)
 
 ## Contributing
 
-This project is far from finish. Any fix, contribute, or give an idea is very appreciated
+This project is far from finish. Any fix, contribute, or an idea is very appreciated
