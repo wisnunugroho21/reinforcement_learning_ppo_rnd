@@ -256,8 +256,8 @@ class Agent:
         torch.save(self.policy_old.state_dict(), 'old_actor_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('actor_pong_ppo_rnd.pth', map_location='cpu'))        
-        self.policy_old.load_state_dict(torch.load('old_actor_pong_ppo_rnd.pth', map_location='cpu'))   
+        self.policy.load_state_dict(torch.load('actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('old_actor_pong_ppo_rnd.pth'))   
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
