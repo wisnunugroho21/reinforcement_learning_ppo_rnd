@@ -188,7 +188,7 @@ class Utils:
             
         return torch.stack(returns)
       
-    def q_values(self, reward, next_value, done, value_function):
+    def q_values(self, reward, next_value, done):
         # Finding Q Values
         # Q = R + V(St+1)
         q_values = reward + (1 - done) * self.gamma * next_value           
