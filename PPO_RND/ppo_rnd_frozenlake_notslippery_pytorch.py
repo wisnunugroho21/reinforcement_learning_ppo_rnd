@@ -177,28 +177,32 @@ class Utils:
             datas = datas.detach().numpy()            
         return datas        
       
-    def discounted(self, datas):       
-        discounted_datas = torch.zeros_like(datas)
+    def discounted(self, datas):
+        # Discounting future reward        
+        returns = []        
         running_add = 0
         
         for i in reversed(range(len(datas))):
             running_add = running_add * self.gamma + datas[i]
-            discounted_datas[i] = running_add
+            returns.insert(0, running_add)
             
-        return discounted_datas
+        return torch.stack(returns)
       
     def q_values(self, reward, next_value, done, value_function):
+        # Finding Q Values
+        # Q = R + V(St+1)
         q_values = reward + (1 - done) * self.gamma * next_value           
         return q_values
       
     def compute_GAE(self, values, rewards, next_value, done):
+        # Computing general advantages estimator
         gae = 0
         returns = []
         
         for step in reversed(range(len(rewards))):   
             delta = rewards[step] + self.gamma * next_value[step] * (1 - done[step]) - values[step]
-            gae = delta + self.lam * gae
-            returns.append(gae.detach())
+            gae = delta + self.gamma * self.lam * gae
+            returns.insert(0, gae)
             
         return torch.stack(returns)
         

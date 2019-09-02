@@ -114,14 +114,14 @@ class Utils:
       
     def discounted(self, datas):
         # Discounting future reward        
-        discounted_datas = torch.zeros_like(datas)
+        returns = []        
         running_add = 0
         
         for i in reversed(range(len(datas))):
             running_add = running_add * self.gamma + datas[i]
-            discounted_datas[i] = running_add
+            returns.insert(0, running_add)
             
-        return discounted_datas
+        return torch.stack(returns)
       
     def q_values(self, reward, next_value, done, value_function):
         # Finding Q Values
@@ -136,8 +136,8 @@ class Utils:
         
         for step in reversed(range(len(rewards))):   
             delta = rewards[step] + self.gamma * next_value[step] * (1 - done[step]) - values[step]
-            gae = delta + self.lam * gae
-            returns.append(gae.detach())
+            gae = delta + self.gamma * self.lam * gae
+            returns.insert(0, gae)
             
         return torch.stack(returns)
 
