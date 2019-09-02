@@ -11,6 +11,7 @@ import numpy as np
 import sys
 import numpy
 
+torch.set_printoptions(edgeitems = sys.maxsize)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")  
 dataType = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
       
@@ -245,22 +246,22 @@ class Utils:
 class Agent:  
     def __init__(self, state_dim, action_dim):        
         self.policy_clip = 0.1 
-        self.value_clip = 1      
+        self.value_clip = 0.1      
         self.entropy_coef = 0.01
-        self.vf_loss_coef = 1
+        self.vf_loss_coef = 0.5
 
-        self.PPO_epochs = 3
-        self.RND_epochs = 3
+        self.PPO_epochs = 5
+        self.RND_epochs = 5
         
         self.ex_advantages_coef = 2
         self.in_advantages_coef = 1
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.0001) 
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001) 
 
         self.rnd_predict = RND_predictor_Model(state_dim, action_dim)
-        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.0001)
+        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.001)
         self.rnd_target = RND_target_Model(state_dim, action_dim)
 
         self.memory = Memory()
@@ -287,17 +288,16 @@ class Agent:
         return forward_loss
 
     # Loss for PPO
-    def get_loss(self, mean_obs, std_obs, old_states, old_actions, rewards, old_next_states, dones):      
-        action_probs, in_value, ex_value  = self.policy(old_states)  
-        old_action_probs, in_old_value, ex_old_value = self.policy_old(old_states)
-        _, next_in_value, next_ex_value = self.policy(old_next_states)
+    def get_loss(self, mean_obs, std_obs, states, actions, rewards, next_states, dones):      
+        action_probs, in_value, ex_value  = self.policy(states)  
+        old_action_probs, in_old_value, ex_old_value = self.policy_old(states)
+        _, next_in_value, next_ex_value = self.policy(next_states)
         
-        obs = self.utils.normalize(old_next_states, mean_obs, std_obs)
+        obs = self.utils.normalize(next_states, mean_obs, std_obs)
         state_pred = self.rnd_predict(obs)
         state_target = self.rnd_target(obs)
         
         # Don't update old value
-        old_action_probs = old_action_probs.detach()
         in_old_value = in_old_value.detach()
         ex_old_value = ex_old_value.detach()
 
@@ -312,33 +312,34 @@ class Agent:
         # Getting entropy from the action probability
         dist_entropy = self.utils.entropy(action_probs).mean()
 
-        # Getting external general advantages estimator
-        external_rewards = rewards.detach()
+        # Getting external general advantages estimator        
         external_advantage = self.utils.compute_GAE(ex_value, rewards, next_ex_value, dones).detach()
+        external_returns = self.utils.discounted(rewards).detach()
                     
         # Computing internal reward, then getting internal general advantages estimator
-        intrinsic_rewards = (state_target - state_pred).pow(2).mean(-1).detach()
+        intrinsic_rewards = (state_target - state_pred).pow(2).mean(-1)        
         intrinsic_advantage = self.utils.compute_GAE(in_value, intrinsic_rewards, next_in_value, dones)
         intrinsic_advantage = self.utils.normalize(intrinsic_advantage).detach()
+        intrinsic_returns = self.utils.discounted(intrinsic_rewards).detach()
         
         # Getting overall advantages
         advantages = (self.ex_advantages_coef * external_advantage + self.in_advantages_coef * intrinsic_advantage).detach()
         
         # Getting External critic loss by using Clipped critic value
         ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
-        ex_vf_losses1 = (external_rewards - ex_value).pow(2) # Mean Squared Error
-        ex_vf_losses2 = (external_rewards - ex_vpredclipped).pow(2) # Mean Squared Error
+        ex_vf_losses1 = (external_returns - ex_value).pow(2) # Mean Squared Error
+        ex_vf_losses2 = (external_returns - ex_vpredclipped).pow(2) # Mean Squared Error
         critic_ext_loss = torch.min(ex_vf_losses1, ex_vf_losses2).mean()
 
         # Getting Intrinsic critic loss
-        critic_int_loss = (intrinsic_rewards - in_value).pow(2).mean()
+        critic_int_loss = (intrinsic_returns - in_value).pow(2).mean()
         
         # Getting overall critic loss
-        critic_loss = critic_ext_loss + critic_int_loss
+        critic_loss = (critic_ext_loss + critic_int_loss) * 0.5
 
         # Finding the ratio (pi_theta / pi_theta__old):  
-        logprobs = self.utils.logprob(action_probs, old_actions) 
-        old_logprobs = self.utils.logprob(old_action_probs, old_actions).detach()
+        logprobs = self.utils.logprob(action_probs, actions) 
+        old_logprobs = self.utils.logprob(old_action_probs, actions).detach()
         
         # Finding Surrogate Loss:
         ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs
@@ -348,8 +349,7 @@ class Agent:
         
         # We need to maximaze Policy Loss to make agent always find Better Rewards
         # and minimize Critic Loss and 
-        loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss 
-                
+        loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss
         return loss       
       
     def act(self, state):
@@ -385,13 +385,13 @@ class Agent:
         length = len(self.memory.states)
 
         # Convert list in tensor
-        old_states = torch.FloatTensor(self.memory.states).to(device).detach()
-        old_actions = torch.FloatTensor(self.memory.actions).to(device).detach()
-        old_next_states = torch.FloatTensor(self.memory.next_states).to(device).detach()
+        states = torch.FloatTensor(self.memory.states).to(device).detach()
+        actions = torch.FloatTensor(self.memory.actions).to(device).detach()
+        next_states = torch.FloatTensor(self.memory.next_states).to(device).detach()
 
         # Convert list to tensor and change the dimensions
-        dones = torch.FloatTensor(self.memory.dones).view(length, 1).view(length, 1).to(device).detach() 
-        rewards = torch.FloatTensor(self.memory.rewards).view(length, 1).view(length, 1).to(device).detach()
+        rewards = torch.FloatTensor(self.memory.rewards).view(length, 1).to(device).detach()
+        dones = torch.FloatTensor(self.memory.dones).view(length, 1).to(device).detach()
 
         # Getting value
         mean_obs = self.memory.mean_obs.detach()
@@ -399,7 +399,7 @@ class Agent:
                 
         # Optimize policy for K epochs:
         for epoch in range(self.PPO_epochs):
-            loss = self.get_loss(mean_obs, std_obs, old_states, old_actions, rewards, old_next_states, dones)          
+            loss = self.get_loss(mean_obs, std_obs, states, actions, rewards, next_states, dones)          
                         
             self.policy_optimizer.zero_grad()
             loss.backward()                    
@@ -412,16 +412,16 @@ class Agent:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
-        torch.save(self.rnd_predict.state_dict(), '/test/Your Folder/rnd_predict_pong_ppo_rnd.pth')
-        torch.save(self.rnd_target.state_dict(), '/test/Your Folder/rnd_target_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.rnd_predict.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/rnd_predict_pong_ppo_rnd.pth')
+        torch.save(self.rnd_target.state_dict(), '/test/My Drive/RL_Pong_PPO_RND/rnd_target_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))
-        self.rnd_predict.load_state_dict(torch.load('/test/Your Folder/rnd_predict_pong_ppo_rnd.pth'))        
-        self.rnd_target.load_state_dict(torch.load('/test/Your Folder/rnd_target_pong_ppo_rnd.pth'))    
+        self.policy.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/old_actor_pong_ppo_rnd.pth'))
+        self.rnd_predict.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/rnd_predict_pong_ppo_rnd.pth'))        
+        self.rnd_target.load_state_dict(torch.load('/test/My Drive/RL_Pong_PPO_RND/rnd_target_pong_ppo_rnd.pth'))    
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -472,7 +472,7 @@ def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_updat
         if training_mode:
             if t_rnd == n_rnd_update:
                 agent.update_rnd()
-                print('RND has been updated')
+                #print('RND has been updated')
                 t_rnd = 0
         
         if render:
@@ -519,7 +519,7 @@ def main():
     n_plot_batch = 100 # How many episode you want to plot the result
     n_rnd_update = 128 # How many episode before you update the RND
     n_episode = 1000 # How many episode you want to run
-    n_init_episode = 2048
+    n_init_episode = 1024
 
     mean_obs = None
     std_obs = None

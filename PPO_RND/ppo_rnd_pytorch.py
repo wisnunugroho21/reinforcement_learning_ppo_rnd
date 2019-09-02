@@ -258,23 +258,21 @@ class Agent:
         return forward_loss
 
     # Loss for PPO
-    def get_loss(self, old_states, old_actions, rewards, old_next_states, dones):      
-        action_probs, in_value, ex_value  = self.policy(old_states)  
-        old_action_probs, in_old_value, ex_old_value = self.policy_old(old_states)
-        _, next_in_value, next_ex_value = self.policy(old_next_states)
+    def get_loss(self, states, actions, rewards, next_states, dones):      
+        action_probs, in_value, ex_value  = self.policy(states)  
+        old_action_probs, in_old_value, ex_old_value = self.policy_old(states)
+        _, next_in_value, next_ex_value = self.policy(next_states)
         
-        # We use next state as our observation for RND
-        state_pred = self.rnd_predict(old_next_states)
-        state_target = self.rnd_target(old_next_states)
+        state_pred = self.rnd_predict(next_states)
+        state_target = self.rnd_target(next_states)
         
         # Don't update old value
-        old_action_probs = old_action_probs.detach()
         in_old_value = in_old_value.detach()
         ex_old_value = ex_old_value.detach()
 
         # Don't update rnd value
         state_target = state_target.detach()
-        state_pred = state_pred.detach()
+        state_pred = state_pred.detach()        
 
         # Don't update next value
         next_in_value = next_in_value.detach()
@@ -283,57 +281,54 @@ class Agent:
         # Getting entropy from the action probability
         dist_entropy = self.utils.entropy(action_probs).mean()
 
-        # Getting external general advantages estimator
-        external_rewards = rewards.detach()
+        # Getting external general advantages estimator        
         external_advantage = self.utils.compute_GAE(ex_value, rewards, next_ex_value, dones).detach()
+        external_returns = self.utils.discounted(rewards).detach()
                     
         # Computing internal reward, then getting internal general advantages estimator
-        intrinsic_rewards = (state_target - state_pred).pow(2).mean(-1).detach()
+        intrinsic_rewards = (state_target - state_pred).pow(2).mean(-1)        
         intrinsic_advantage = self.utils.compute_GAE(in_value, intrinsic_rewards, next_in_value, dones)
+        intrinsic_returns = self.utils.discounted(intrinsic_rewards).detach()
         
         # Getting overall advantages
         advantages = (self.ex_advantages_coef * external_advantage + self.in_advantages_coef * intrinsic_advantage).detach()
         
         # Getting External critic loss by using Clipped critic value
-        ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.value_ex_clip, self.value_ex_clip) # Minimize the difference between old value and new value
-        ex_vf_losses1 = (external_rewards - ex_value).pow(2) # Mean Squared Error
-        ex_vf_losses2 = (external_rewards - ex_vpredclipped).pow(2) # Mean Squared Error
+        ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
+        ex_vf_losses1 = (external_returns - ex_value).pow(2) # Mean Squared Error
+        ex_vf_losses2 = (external_returns - ex_vpredclipped).pow(2) # Mean Squared Error
         critic_ext_loss = torch.min(ex_vf_losses1, ex_vf_losses2).mean()
 
         # Getting Intrinsic critic loss
-        critic_int_loss = (intrinsic_rewards - in_value).pow(2).mean()
+        critic_int_loss = (intrinsic_returns - in_value).pow(2).mean()
         
         # Getting overall critic loss
-        critic_loss = critic_ext_loss + critic_int_loss
+        critic_loss = (critic_ext_loss + critic_int_loss) * 0.5
 
         # Finding the ratio (pi_theta / pi_theta__old):  
-        logprobs = self.utils.logprob(action_probs, old_actions) 
-        old_logprobs = self.utils.logprob(old_action_probs, old_actions).detach()
+        logprobs = self.utils.logprob(action_probs, actions) 
+        old_logprobs = self.utils.logprob(old_action_probs, actions).detach()
         
         # Finding Surrogate Loss:
         ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs
         surr1 = ratios * advantages
         surr2 = torch.clamp(ratios, 1 - self.policy_clip, 1 + self.policy_clip) * advantages
-        pg_loss = torch.min(surr1, surr2).mean()       
+        pg_loss = torch.min(surr1, surr2).mean()  
         
         # We need to maximaze Policy Loss to make agent always find Better Rewards
-        # and minimize Critic Loss
-        loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss 
-        
-        # Approx KL to choose whether we must continue the gradient descent
-        approx_kl = 0.5 * (logprobs - old_logprobs).pow(2).mean()
-        
-        return loss, approx_kl       
+        # and minimize Critic Loss and 
+        loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss
+        return loss       
       
     def act(self, state):
-        state = torch.FloatTensor(state).to(device)      
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)
         action_probs = self.policy_old(state, is_act = True)
-        
+
         # Sample the action
-        action = self.utils.sample(action_probs)
+        action = self.utils.sample(action_probs)       
         
         self.memory.save_actions(action)         
-        return action.item() 
+        return action.item()  
 
     # Update the RND part (the state and predictor)
     def update_rnd(self):
@@ -351,26 +346,22 @@ class Agent:
         # Clear the observation
         self.memory.clearObs()
         
-    # Update the PPO part (the actor and value)
     def update_ppo(self):        
         length = len(self.memory.states)
 
         # Convert list in tensor
-        old_states = torch.FloatTensor(self.memory.states).to(device).detach()
-        old_actions = torch.FloatTensor(self.memory.actions).to(device).detach()
-        old_next_states = torch.FloatTensor(self.memory.next_states).to(device).detach()
-        dones = torch.FloatTensor(self.memory.dones).view(length, 1).view(length, 1).to(device).detach() 
-        rewards = torch.FloatTensor(self.memory.rewards).view(length, 1).view(length, 1).to(device).detach()
+        states = torch.FloatTensor(self.memory.states).to(device).detach()
+        actions = torch.FloatTensor(self.memory.actions).to(device).detach()
+        next_states = torch.FloatTensor(self.memory.next_states).to(device).detach()
+
+        # Convert list to tensor and change the dimensions
+        rewards = torch.FloatTensor(self.memory.rewards).view(length, 1).to(device).detach()
+        dones = torch.FloatTensor(self.memory.dones).view(length, 1).to(device).detach()
                 
         # Optimize policy for K epochs:
         for epoch in range(self.PPO_epochs):
-            loss, approx_kl = self.get_loss(old_states, old_actions, rewards, old_next_states, dones)          
-            
-            # If KL is bigger than threshold, stop update and continue to next episode
-            if approx_kl > (1.5 * self.target_kl):
-                print('KL greater than target. Stop update at epoch : ', epoch + 1)
-                break
-            
+            loss = self.get_loss(states, actions, rewards, next_states, dones)          
+                        
             self.policy_optimizer.zero_grad()
             loss.backward()                    
             self.policy_optimizer.step() 
