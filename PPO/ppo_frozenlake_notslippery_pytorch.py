@@ -114,16 +114,16 @@ class Utils:
       
     def discounted(self, datas):
         # Discounting future reward        
-        discounted_datas = torch.zeros_like(datas)
+        returns = []        
         running_add = 0
         
         for i in reversed(range(len(datas))):
             running_add = running_add * self.gamma + datas[i]
-            discounted_datas[i] = running_add
+            returns.insert(0, running_add)
             
-        return discounted_datas
+        return torch.stack(returns)
       
-    def q_values(self, reward, next_value, done, value_function):
+    def q_values(self, reward, next_value, done):
         # Finding Q Values
         # Q = R + V(St+1)
         q_values = reward + (1 - done) * self.gamma * next_value           
@@ -136,8 +136,8 @@ class Utils:
         
         for step in reversed(range(len(rewards))):   
             delta = rewards[step] + self.gamma * next_value[step] * (1 - done[step]) - values[step]
-            gae = delta + self.lam * gae
-            returns.append(gae.detach())
+            gae = delta + self.gamma * self.lam * gae
+            returns.insert(0, gae)
             
         return torch.stack(returns)
 
@@ -158,17 +158,16 @@ class Utils:
         
 class Agent:  
     def __init__(self, state_dim, action_dim):        
-        self.policy_clip = 0.2 
-        self.value_clip = 1      
+        self.policy_clip = 0.1 
+        self.value_clip = 0.1      
         self.entropy_coef = 0.01
-        self.vf_loss_coef = 1
-        self.target_kl = 1
+        self.vf_loss_coef = 0.5
 
-        self.PPO_epochs = 4
+        self.PPO_epochs = 5
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.0001)
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001)
 
         self.memory = Memory()
         self.utils = Utils()        
@@ -180,34 +179,30 @@ class Agent:
         self.memory.save_observation(obs)
 
     # Loss for PPO
-    def get_loss(self, old_states, old_actions, rewards, old_next_states, dones):      
-        action_probs, value  = self.policy(old_states)  
-        old_action_probs, old_value = self.policy_old(old_states)
-        _, next_value = self.policy(old_next_states)
+    def get_loss(self, states, actions, rewards, next_states, dones):      
+        action_probs, values  = self.policy(states)  
+        old_action_probs, old_values = self.policy_old(states)
+        _, next_values  = self.policy(next_states)
         
         # Don't update old value
-        old_action_probs = old_action_probs.detach()
-        old_value = old_value.detach()
-
-        # Don't update next value
-        next_value = next_value.detach()
+        old_values = old_values.detach()
                 
         # Getting entropy from the action probability
         dist_entropy = self.utils.entropy(action_probs).mean()
 
         # Getting external general advantages estimator
-        rewards = rewards.detach()
-        advantages = self.utils.compute_GAE(value, rewards, next_value, dones).detach()
+        advantages = self.utils.compute_GAE(values, rewards, next_values, dones).detach()
+        returns = self.utils.discounted(rewards).detach()
         
         # Getting External critic loss by using Clipped critic value
-        vpredclipped = old_value + torch.clamp(value - old_value, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
-        vf_losses1 = (rewards - value).pow(2) # Mean Squared Error
-        vf_losses2 = (rewards - vpredclipped).pow(2) # Mean Squared Error
-        critic_loss = torch.min(vf_losses1, vf_losses2).mean()
+        vpredclipped = old_values + torch.clamp(values - old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
+        vf_losses1 = (returns - values).pow(2) # Mean Squared Error
+        vf_losses2 = (returns - vpredclipped).pow(2) # Mean Squared Error
+        critic_loss = torch.min(vf_losses1, vf_losses2).mean() * 0.5
 
         # Finding the ratio (pi_theta / pi_theta__old):  
-        logprobs = self.utils.logprob(action_probs, old_actions) 
-        old_logprobs = self.utils.logprob(old_action_probs, old_actions).detach()
+        logprobs = self.utils.logprob(action_probs, actions) 
+        old_logprobs = self.utils.logprob(old_action_probs, actions).detach()
         
         # Finding Surrogate Loss:
         ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs
@@ -218,11 +213,7 @@ class Agent:
         # We need to maximaze Policy Loss to make agent always find Better Rewards
         # and minimize Critic Loss and 
         loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss 
-        
-        # Approx KL to choose whether we must continue the gradient descent
-        approx_kl = 0.5 * (logprobs - old_logprobs).pow(2).mean()
-        
-        return loss, approx_kl       
+        return loss       
       
     def act(self, state):
         state = torch.FloatTensor(state).to(device)      
