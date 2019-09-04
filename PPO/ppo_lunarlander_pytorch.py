@@ -244,12 +244,12 @@ class Agent:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), 'lunarlander_weights/actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), 'lunarlander_weights/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('lunarlander_weights/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('lunarlander_weights/old_actor_pong_ppo_rnd.pth'))   
+        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))   
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -268,41 +268,7 @@ def plot(datas):
     print('Min :', np.min(datas))
     print('Avg :', np.mean(datas))
 
-def run_episode(env, agent, state_dim, render, training_mode, total_time, n_update):
-    utils = Utils()
-    ############################################
-    state = env.reset()
-    done = False
-    total_reward = 0
-    eps_time = 0
-    ############################################
-    
-    while not done:
-        # Running policy_old:            
-        action = int(agent.act(state))
-        next_state, reward, done, info = env.step(action)
-        
-        eps_time += 1 
-        total_time += 1
-
-        total_reward += reward
-        reward *= 10 
-          
-        if training_mode:
-            agent.save_eps(state, reward, action, done, next_state) 
-
-            if total_time % n_update == 0:
-                agent.update_ppo()
-                total_time = 0
-            
-        state = next_state     
-                
-        if render:
-            env.render()
-        if done:
-            return total_reward, eps_time, total_time
-
-'''def run_episode(env, agent, state_dim, render, training_mode):
+def run_episode(env, agent, state_dim, render, training_mode):
     utils = Utils()
     ############################################
     state = env.reset()
@@ -327,18 +293,18 @@ def run_episode(env, agent, state_dim, render, training_mode, total_time, n_upda
         if render:
             env.render()
         if done:
-            return total_reward, eps_time'''
+            return total_reward, eps_time
     
 def main():
     ############## Hyperparameters ##############
     using_google_drive = False # If you using Google Colab and want to save the agent to your GDrive, set this to True
-    load_weights = True # If you want to load the agent, set this to True
+    load_weights = False # If you want to load the agent, set this to True
     save_weights = False # If you want to save the agent, set this to True
-    training_mode = False # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
+    training_mode = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
     reward_threshold = 200 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     
-    render = True # If you want to display the image. Turn this off if you run this in Google Collab
-    n_update = 128 # How many episode before you update the Policy
+    render = False # If you want to display the image. Turn this off if you run this in Google Collab
+    n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
     n_episode = 10000 # How many episode you want to run
     #############################################         
@@ -375,17 +341,16 @@ def main():
     total_time = 0
     
     for i_episode in range(1, n_episode):
-        #total_reward, time = run_episode(env, agent, state_dim, render, training_mode)
-        total_reward, time, total_time = run_episode(env, agent, state_dim, render, training_mode, total_time, n_update)
+        total_reward, time = run_episode(env, agent, state_dim, render, training_mode)
         print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, int(total_reward), time))
         batch_rewards.append(int(total_reward))
         batch_times.append(time)
-
+        
         if i_episode % n_update == 0:
             agent.update_ppo()
 
-            if save_weights:
-                agent.save_weights()                
+        if save_weights:
+            agent.save_weights()                           
                             
         if reward_threshold:
             if len(batch_solved_reward) == 100:            
