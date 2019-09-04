@@ -53,6 +53,14 @@ RND incentivizes visiting unfamiliar states by measuring how hard it is to predi
 
 You can read full detail of RND in [here](https://openai.com/blog/reinforcement-learning-with-prediction-based-rewards/)
 
+## Result
+
+### LunarLander
+
+| Result Gif  | Award Progress Graph |
+| ------------- | ------------- |
+| ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/giphy1.gif)  | ![Award Progress Graph](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/lunarlander_ppo.png)  |
+
 ## Future development
 
 I really want to adapt this code to Tensorflow  
