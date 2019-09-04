@@ -61,7 +61,7 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 | ------------- | ------------- |
 | ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/giphy1.gif)  | ![Award Progress Graph](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/lunarlander_ppo.png)  |
 
-## Future development
+## Future Development
 
 I really want to adapt this code to Tensorflow  
 But I think it's better to wait for Tensorflow 2.0 to be fully released
