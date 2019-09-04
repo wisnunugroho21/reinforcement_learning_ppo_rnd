@@ -55,7 +55,7 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 
 ## Result
 
-### LunarLander
+### LunarLander using PPO (Non RND)
 
 | Result Gif  | Award Progress Graph |
 | ------------- | ------------- |
