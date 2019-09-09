@@ -297,7 +297,7 @@ class Agent:
         ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
         ex_vf_losses1 = (external_returns - ex_value).pow(2) # Mean Squared Error
         ex_vf_losses2 = (external_returns - ex_vpredclipped).pow(2) # Mean Squared Error
-        critic_ext_loss = torch.min(ex_vf_losses1, ex_vf_losses2).mean()
+        critic_ext_loss = torch.max(ex_vf_losses1, ex_vf_losses2).mean()
 
         # Getting Intrinsic critic loss
         critic_int_loss = (intrinsic_returns - in_value).pow(2).mean()

@@ -4,8 +4,13 @@ from gym.envs.registration import register
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical
+import torchvision
+
 import matplotlib.pyplot as plt
 import numpy as np
+import sys
+import numpy
+
 from keras.utils import to_categorical
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")  
@@ -13,8 +18,9 @@ dataType = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatT
       
 class PPO_Model(nn.Module):
     def __init__(self, state_dim, action_dim):
-        super(PPO_Model, self).__init__()
-        
+        super(PPO_Model, self).__init__()   
+
+        # Actor
         self.actor_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
                 nn.ELU(),
@@ -24,6 +30,7 @@ class PPO_Model(nn.Module):
                 nn.Softmax(-1)
               ).float().to(device)
         
+        # Intrinsic Critic
         self.value_in_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
                 nn.ELU(),
@@ -32,6 +39,7 @@ class PPO_Model(nn.Module):
                 nn.Linear(64, 1)
               ).float().to(device)
         
+        # External Critic
         self.value_ex_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
                 nn.ELU(),
@@ -40,6 +48,8 @@ class PPO_Model(nn.Module):
                 nn.Linear(64, 1)
               ).float().to(device)
         
+    # Init wieghts to make training faster
+    # But don't init weight if you load weight from file
     def lets_init_weights(self):      
         self.actor_layer.apply(self.init_weights)
         self.value_in_layer.apply(self.init_weights)
@@ -50,10 +60,17 @@ class PPO_Model(nn.Module):
             if 'bias' in name:
                nn.init.constant_(param, 0.01)
             elif 'weight' in name:
-                nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'relu')
+                nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'leaky_relu')
+
+    def init_memory_weights(self, m):
+        for name, param in m.named_parameters():
+            if 'bias' in name:
+               nn.init.constant_(param, 0.01)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param, gain=nn.init.calculate_gain('tanh'))
         
     def forward(self, state, is_act = False):
-        if is_act: 
+        if is_act:         
             return self.actor_layer(state)
         else:
             return self.actor_layer(state), self.value_in_layer(state), self.value_ex_layer(state)
@@ -62,18 +79,19 @@ class RND_predictor_Model(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(RND_predictor_Model, self).__init__()
 
+        # State Predictor
         self.state_predict_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
-                nn.ELU(),
+                nn.Tanh(),
                 nn.Linear(64, 64),
-                nn.ELU(),
-                nn.Linear(64, 10)
+                nn.Tanh(),
+                nn.Linear(64, 1)
               ).float().to(device)
 
     def init_state_predict_weights(self, m):
         for name, param in m.named_parameters():
             if 'bias' in name:
-              nn.init.constant_(param, 0.01)
+                nn.init.constant_(param, 0.01)
             elif 'weight' in name:
                 nn.init.constant_(param, 1)
 
@@ -87,18 +105,19 @@ class RND_target_Model(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(RND_target_Model, self).__init__()
 
+        # State Target
         self.state_target_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
                 nn.ELU(),
                 nn.Linear(64, 64),
                 nn.ELU(),
-                nn.Linear(64, 10)
+                nn.Linear(64, 1)
               ).float().to(device)
               
     def init_state_target_weights(self, m):
         for name, param in m.named_parameters():
             if 'bias' in name:
-              nn.init.constant_(param, 1)
+                nn.init.constant_(param, 1)
             elif 'weight' in name:
                 nn.init.constant_(param, 0.01)
 
@@ -109,7 +128,7 @@ class RND_target_Model(nn.Module):
         return self.state_target_layer(state)
 
 class Memory:
-    def __init__(self):
+    def __init__(self, state_dim, action_dim):
         self.actions = []
         self.states = []
         self.logprobs = []
@@ -117,6 +136,11 @@ class Memory:
         self.dones = []     
         self.next_states = []
         self.observation = []
+        self.mean_obs = torch.zeros(state_dim).to(device)
+        self.std_obs = torch.zeros(state_dim).to(device)
+        self.std_in_rewards = torch.FloatTensor([0]).to(device)
+        self.total_number_obs = torch.FloatTensor([0]).to(device)
+        self.total_number_rwd = torch.FloatTensor([0]).to(device)
         
     def save_eps(self, state, reward, next_states, done):
         self.rewards.append(reward)
@@ -144,10 +168,26 @@ class Memory:
     def clearObs(self):
         del self.observation[:]
         
+    def updateObsNormalizationParam(self):
+        obs = torch.FloatTensor(self.observation).to(device)      
+        
+        self.mean_obs = ((self.mean_obs * self.total_number_obs) + obs.sum(0)) / (self.total_number_obs + obs.shape[0])
+        self.std_obs = (((self.std_obs.pow(2) * self.total_number_obs) + (obs.var(0) * obs.shape[0])) / (self.total_number_obs + obs.shape[0])).sqrt()
+        self.total_number_obs += len(obs)
+    
+    def updateRwdNormalizationParam(self, in_rewards):
+        std_in_rewards = torch.FloatTensor([self.std_in_rewards]).to(device)
+        
+        self.std_in_rewards = (((std_in_rewards.pow(2) * self.total_number_rwd) + (in_rewards.var() * in_rewards.shape[0])) / (self.total_number_rwd + in_rewards.shape[0])).sqrt()
+        self.total_number_rwd += len(in_rewards)
+        
 class Utils:
     def __init__(self):
         self.gamma = 0.95
         self.lam = 0.99
+
+    # Categorical Distribution is used for Discrete Action Environment
+    # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
     
     def sample(self, datas):
         distribution = Categorical(datas)      
@@ -161,8 +201,15 @@ class Utils:
         distribution = Categorical(datas)
         return distribution.log_prob(value_data).float().to(device)      
       
-    def normalize(self, data):
-        data_normalized = (data - torch.mean(data)) / torch.std(data)
+    def normalize(self, data, mean = None, std = None, clip = None):
+        if isinstance(mean, torch.Tensor) and isinstance(std, torch.Tensor):
+            data_normalized = (data - mean) / (std + 1e-8)            
+        else:
+            data_normalized = (data - torch.mean(data)) / (torch.std(data) + 1e-8)
+                    
+        if clip :
+            data_normalized = torch.clamp(data_normalized, -clip, clip)
+
         return data_normalized
       
     def to_numpy(self, datas):
@@ -200,29 +247,46 @@ class Utils:
             returns.insert(0, gae)
             
         return torch.stack(returns)
+
+    def prepro(self, I):
+        # Crop the image and convert it to Grayscale
+        # For more information : https://medium.com/@dhruvp/how-to-write-a-neural-network-to-play-pong-from-scratch-956b57d4f6e0
+
+        """ prepro 210x160x3 uint8 frame into 6400 (80x80) 1D float vector """
+        I = I[35:195] # crop
+        #I = np.dot(I[...,:3], [0.2989, 0.5870, 0.1140])
+        I = I[::2,::2, 0] # downsample by factor of 2
+        I[I == 144] = 0 # erase background (background type 1)
+        I[I == 109] = 0 # erase background (background type 2)
+        I[I != 0] = 1 # everything else (paddles, ball) just set to 1
+        
+        X = I.astype(np.float32).ravel() # Combine items in 1 array 
+        return X
         
 class Agent:  
     def __init__(self, state_dim, action_dim):        
         self.policy_clip = 0.1 
-        self.value_clip = 0.1      
-        self.entropy_coef = 0.01
+        self.value_clip = 1      
+        self.entropy_coef = 0.001
         self.vf_loss_coef = 1
 
-        self.PPO_epochs = 5
-        self.RND_epochs = 5
+        self.PPO_epochs = 4
+        self.RND_epochs = 4
         
         self.ex_advantages_coef = 2
         self.in_advantages_coef = 1
         
+        self.clip_normalization = 5
+        
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001) 
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.0001) 
 
         self.rnd_predict = RND_predictor_Model(state_dim, action_dim)
-        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.001)
+        self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.0001)
         self.rnd_target = RND_target_Model(state_dim, action_dim)
 
-        self.memory = Memory()
+        self.memory = Memory(state_dim, action_dim)
         self.utils = Utils()        
         
     def save_eps(self, state, reward, next_states, done):
@@ -232,7 +296,9 @@ class Agent:
         self.memory.save_observation(obs)
 
     # Loss for RND 
-    def get_rnd_loss(self, obs):
+    def get_rnd_loss(self, obs, mean_obs, std_obs):
+        obs = self.utils.normalize(obs, mean_obs, std_obs)
+
         state_pred = self.rnd_predict(obs)
         state_target = self.rnd_target(obs)
         
@@ -241,16 +307,17 @@ class Agent:
         
         # Mean Squared Error Calculation between state and predict
         forward_loss = (state_target - state_pred).pow(2).mean()
-        return forward_loss
+        return forward_loss, (state_target - state_pred)
 
     # Loss for PPO
-    def get_loss(self, states, actions, rewards, next_states, dones):      
+    def get_loss(self, std_in_rewards, mean_obs, std_obs, states, actions, rewards, next_states, dones):      
         action_probs, in_value, ex_value  = self.policy(states)  
         old_action_probs, in_old_value, ex_old_value = self.policy_old(states)
         _, next_in_value, next_ex_value = self.policy(next_states)
         
-        state_pred = self.rnd_predict(next_states)
-        state_target = self.rnd_target(next_states)
+        obs = self.utils.normalize(next_states, mean_obs, std_obs, self.clip_normalization)        
+        state_pred = self.rnd_predict(obs)
+        state_target = self.rnd_target(obs)
         
         # Don't update old value
         in_old_value = in_old_value.detach()
@@ -268,12 +335,12 @@ class Agent:
         dist_entropy = self.utils.entropy(action_probs).mean()
 
         # Getting external general advantages estimator        
-        external_advantage = self.utils.compute_GAE(ex_value, rewards, next_ex_value, dones)
+        external_advantage = self.utils.compute_GAE(ex_value, rewards, next_ex_value, dones).detach()
         external_returns = self.utils.discounted(rewards).detach()
                     
         # Computing internal reward, then getting internal general advantages estimator
-        intrinsic_rewards = (state_target - state_pred).pow(2).mean(-1)        
-        intrinsic_advantage = self.utils.compute_GAE(in_value, intrinsic_rewards, next_in_value, dones)
+        intrinsic_rewards = (state_target - state_pred).pow(2) / (std_in_rewards + 1e-8)
+        intrinsic_advantage = self.utils.compute_GAE(in_value, intrinsic_rewards, next_in_value, dones).detach()
         intrinsic_returns = self.utils.discounted(intrinsic_rewards).detach()
         
         # Getting overall advantages
@@ -307,31 +374,40 @@ class Agent:
         return loss       
       
     def act(self, state):
-        state = torch.FloatTensor(state).to(device)      
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)
         action_probs = self.policy_old(state, is_act = True)
-        
+
         # Sample the action
-        action = self.utils.sample(action_probs)
+        action = self.utils.sample(action_probs)       
         
         self.memory.save_actions(action)         
-        return action.item() 
+        return action.cpu().item() 
 
     # Update the RND part (the state and predictor)
     def update_rnd(self):
         # Convert list in tensor
         obs = torch.FloatTensor(self.memory.observation).to(device).detach()
+        mean_obs = self.memory.mean_obs.detach()
+        std_obs = self.memory.std_obs.detach()
         
         # Optimize predictor for K epochs:
         for epoch in range(self.RND_epochs):                        
-            loss = self.get_rnd_loss(obs)  
+            loss, intrinsic_rewards = self.get_rnd_loss(obs, mean_obs, std_obs)  
             
             self.rnd_predict_optimizer.zero_grad()
             loss.backward()                    
             self.rnd_predict_optimizer.step() 
-
-        # Clear the observation
-        self.memory.clearObs()
+                    
+        # Update Intrinsic Rewards Normalization Parameter
+        self.memory.updateRwdNormalizationParam(intrinsic_rewards.mean(1))
         
+        # Update Observation Normalization Parameter
+        self.memory.updateObsNormalizationParam()
+        
+        # Clear the observation
+        self.memory.clearObs()        
+        
+    # Update the PPO part (the actor and value)
     def update_ppo(self):        
         length = len(self.memory.states)
 
@@ -343,15 +419,20 @@ class Agent:
         # Convert list to tensor and change the dimensions
         rewards = torch.FloatTensor(self.memory.rewards).view(length, 1).to(device).detach()
         dones = torch.FloatTensor(self.memory.dones).view(length, 1).to(device).detach()
+
+        # Getting value
+        mean_obs = self.memory.mean_obs.detach()
+        std_obs = self.memory.std_obs.detach()
+        std_in_rewards = self.memory.std_in_rewards.detach()
                 
         # Optimize policy for K epochs:
         for epoch in range(self.PPO_epochs):
-            loss = self.get_loss(states, actions, rewards, next_states, dones)          
+            loss = self.get_loss(std_in_rewards, mean_obs, std_obs, states, actions, rewards, next_states, dones)          
                         
             self.policy_optimizer.zero_grad()
             loss.backward()                    
             self.policy_optimizer.step() 
-
+                
         # Clear state, action, reward in memory    
         self.memory.clearMemory()
         
@@ -368,7 +449,7 @@ class Agent:
         self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
         self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))
         self.rnd_predict.load_state_dict(torch.load('/test/Your Folder/rnd_predict_pong_ppo_rnd.pth'))        
-        self.rnd_target.load_state_dict(torch.load('/test/Your Folder/rnd_target_pong_ppo_rnd.pth'))   
+        self.rnd_target.load_state_dict(torch.load('/test/Your Folder/rnd_target_pong_ppo_rnd.pth'))    
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -388,29 +469,30 @@ def plot(datas):
     print('Avg :', np.mean(datas))
 
 def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_update):
+    utils = Utils()
     ############################################
-    state = env.reset()           
+    state = env.reset() 
     done = False
     total_reward = 0
     t = 0
     ############################################
     
-    while not done:           
-        action = int(agent.act(state))
-        state_n, reward, done, info = env.step(action)
+    while not done:
+        # Running policy_old:   
+        state_val = to_categorical(state, num_classes = state_dim) # One hot encoding for state because it's more efficient for Neural Network
+        action = int(agent.act(state_val))
+        state_n, reward, done, _ = env.step(action)
         
         t += 1
-        t_rnd += 1                           
-        total_reward += reward    
-        
-        # There is a bugs in cartpole env which always giving same rewards, even if the state will make env terminate (done = true)
-        # So, i tweak the reward system
-        # reward will negative if the state will make env terminate (done = true)
-        reward = -100 if done and t < 200 else 1
+        t_rnd += 1
+
+        reward = 0 if reward == -1 or reward == -10 else 1
+        total_reward += reward
           
         if training_mode:
-            agent.save_eps(state, reward, state_n, done) 
-            agent.save_observation(state_n) 
+            next_state_val = to_categorical(state_n, num_classes = state_dim)  # One hot encoding for next state   
+            agent.save_eps(state_val, reward, next_state_val, done) 
+            agent.save_observation(next_state_val)
             
         state = state_n     
         
@@ -424,6 +506,26 @@ def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_updat
             env.render()
         if done:
             return total_reward, t, t_rnd
+
+def run_inits_episode(env, agent, state_dim, render, n_init_episode):
+    utils = Utils()
+    ############################################
+    env.reset()
+
+    for i in range(n_init_episode):
+        action = env.action_space.sample()
+        state_n, _, done, _ = env.step(action)
+        next_state_val = to_categorical(state_n, num_classes = state_dim)
+        agent.save_observation(next_state_val)
+
+        if render:
+            env.render()
+
+        if done:
+            env.reset()
+
+    agent.memory.updateObsNormalizationParam()
+    agent.memory.clearObs()
     
 def main():
     ############## Hyperparameters ##############
@@ -437,11 +539,15 @@ def main():
     n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
     n_rnd_update = 128 # How many episode before you update the RND
-    n_episode = 1000 # How many episode you want to run
+    n_episode = 10000 # How many episode you want to run
+    n_init_episode = 1024
+
+    mean_obs = None
+    std_obs = None
     #############################################         
-    env_name = "CartPole-v0"
+    env_name = "Taxi-v2"
     env = gym.make(env_name)
-    state_dim = env.observation_space.shape[0]
+    state_dim = env.observation_space.n
     action_dim = env.action_space.n
         
     utils = Utils()     
@@ -461,6 +567,13 @@ def main():
     
     if torch.cuda.is_available() :
         print('Using GPU')
+
+    #############################################
+
+    if training_mode:
+        run_inits_episode(env, agent, state_dim, render, n_init_episode)
+
+    #############################################
     
     rewards = []   
     batch_rewards = []
@@ -470,29 +583,32 @@ def main():
     batch_times = []
     
     t_rnd = 0
+
+    #############################################
     
-    for i_episode in range(1, n_episode):
+    for i_episode in range(1, n_episode + 1):
         total_reward, time, t_rnd = run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_update)
-        print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, total_reward, time))
+        print('Episode {} \t t_reward: {} \t time: {} '.format(i_episode, total_reward, time))
         batch_rewards.append(total_reward)
-        batch_times.append(time)       
+        batch_times.append(time) 
         
         if training_mode:
+            # update after n episodes
             if i_episode % n_update == 0 and i_episode != 0:
                 agent.update_ppo()
                 #print('Agent has been updated')
 
                 if save_weights:
                     agent.save_weights()
-                    print('Weights saved')
+                    #print('Weights saved')
                     
         if reward_threshold:
             if len(batch_solved_reward) == 100:            
                 if np.mean(batch_solved_reward) >= reward_threshold :              
-                    for reward in batch_times:
+                    for reward in batch_rewards:
                         rewards.append(reward)
 
-                    for time in batch_rewards:
+                    for time in batch_times:
                         times.append(time)                    
 
                     print('You solved task after {} episode'.format(len(rewards)))
@@ -506,6 +622,7 @@ def main():
                 batch_solved_reward.append(total_reward)
             
         if i_episode % n_plot_batch == 0 and i_episode != 0:
+            # Plot the reward, times for every n_plot_batch
             plot(batch_rewards)
             plot(batch_times)
             
@@ -519,12 +636,16 @@ def main():
             batch_times = []
 
             print('========== Cummulative ==========')
+            # Plot the reward, times for every episode
             plot(rewards)
             plot(times)
             
     print('========== Final ==========')
+     # Plot the reward, times for every episode
     plot(rewards)
     plot(times) 
-            
+
+    #############################################
+
 if __name__ == '__main__':
     main()

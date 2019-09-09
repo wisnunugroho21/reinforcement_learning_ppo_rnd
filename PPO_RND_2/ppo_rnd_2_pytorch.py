@@ -80,10 +80,10 @@ class RND_predictor_Model(nn.Module):
         # State Predictor
         self.state_predict_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
-                nn.ELU(),
+                nn.Tanh(),
                 nn.Linear(64, 64),
-                nn.ELU(),
-                nn.Linear(64, 4)
+                nn.Tanh(),
+                nn.Linear(64, 1)
               ).float().to(device)
 
     def init_state_predict_weights(self, m):
@@ -109,7 +109,7 @@ class RND_target_Model(nn.Module):
                 nn.ELU(),
                 nn.Linear(64, 64),
                 nn.ELU(),
-                nn.Linear(64, 4)
+                nn.Linear(64, 1)
               ).float().to(device)
               
     def init_state_target_weights(self, m):
@@ -126,7 +126,7 @@ class RND_target_Model(nn.Module):
         return self.state_target_layer(state)
 
 class Memory:
-    def __init__(self):
+    def __init__(self, state_dim, action_dim):
         self.actions = []
         self.states = []
         self.logprobs = []
@@ -134,8 +134,11 @@ class Memory:
         self.dones = []     
         self.next_states = []
         self.observation = []
-        self.mean_obs = 0
-        self.std_obs = 0
+        self.mean_obs = torch.zeros(state_dim).to(device)
+        self.std_obs = torch.zeros(state_dim).to(device)
+        self.std_in_rewards = torch.FloatTensor([0]).to(device)
+        self.total_number_obs = torch.FloatTensor([0]).to(device)
+        self.total_number_rwd = torch.FloatTensor([0]).to(device)
         
     def save_eps(self, state, reward, next_states, done):
         self.rewards.append(reward)
@@ -163,6 +166,19 @@ class Memory:
     def clearObs(self):
         del self.observation[:]
         
+    def updateObsNormalizationParam(self):
+        obs = torch.FloatTensor(self.observation).to(device)      
+        
+        self.mean_obs = ((self.mean_obs * self.total_number_obs) + obs.sum(0)) / (self.total_number_obs + obs.shape[0])
+        self.std_obs = (((self.std_obs.pow(2) * self.total_number_obs) + (obs.var(0) * obs.shape[0])) / (self.total_number_obs + obs.shape[0])).sqrt()
+        self.total_number_obs += len(obs)
+    
+    def updateRwdNormalizationParam(self, in_rewards):
+        std_in_rewards = torch.FloatTensor([self.std_in_rewards]).to(device)
+        
+        self.std_in_rewards = (((std_in_rewards.pow(2) * self.total_number_rwd) + (in_rewards.var() * in_rewards.shape[0])) / (self.total_number_rwd + in_rewards.shape[0])).sqrt()
+        self.total_number_rwd += len(in_rewards)
+        
 class Utils:
     def __init__(self):
         self.gamma = 0.95
@@ -183,11 +199,14 @@ class Utils:
         distribution = Categorical(datas)
         return distribution.log_prob(value_data).float().to(device)      
       
-    def normalize(self, data, mean = None, std = None):
+    def normalize(self, data, mean = None, std = None, clip = None):
         if isinstance(mean, torch.Tensor) and isinstance(std, torch.Tensor):
-            data_normalized = (data - mean) / std            
+            data_normalized = (data - mean) / (std + 1e-8)            
         else:
-            data_normalized = (data - torch.mean(data)) / torch.std(data)
+            data_normalized = (data - torch.mean(data)) / (torch.std(data) + 1e-8)
+                    
+        if clip :
+            data_normalized = torch.clamp(data_normalized, -clip, clip)
 
         return data_normalized
       
@@ -246,14 +265,16 @@ class Agent:
     def __init__(self, state_dim, action_dim):        
         self.policy_clip = 0.1 
         self.value_clip = 1      
-        self.entropy_coef = 0.01
+        self.entropy_coef = 0.001
         self.vf_loss_coef = 1
 
-        self.PPO_epochs = 3
-        self.RND_epochs = 3
+        self.PPO_epochs = 4
+        self.RND_epochs = 4
         
         self.ex_advantages_coef = 2
         self.in_advantages_coef = 1
+        
+        self.clip_normalization = 5
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
@@ -263,7 +284,7 @@ class Agent:
         self.rnd_predict_optimizer = torch.optim.Adam(self.rnd_predict.parameters(), lr = 0.0001)
         self.rnd_target = RND_target_Model(state_dim, action_dim)
 
-        self.memory = Memory()
+        self.memory = Memory(state_dim, action_dim)
         self.utils = Utils()        
         
     def save_eps(self, state, reward, next_states, done):
@@ -284,15 +305,15 @@ class Agent:
         
         # Mean Squared Error Calculation between state and predict
         forward_loss = (state_target - state_pred).pow(2).mean()
-        return forward_loss
+        return forward_loss, (state_target - state_pred)
 
     # Loss for PPO
-    def get_loss(self, mean_obs, std_obs, states, actions, rewards, next_states, dones):      
+    def get_loss(self, std_in_rewards, mean_obs, std_obs, states, actions, rewards, next_states, dones):      
         action_probs, in_value, ex_value  = self.policy(states)  
         old_action_probs, in_old_value, ex_old_value = self.policy_old(states)
         _, next_in_value, next_ex_value = self.policy(next_states)
         
-        obs = self.utils.normalize(next_states, mean_obs, std_obs)
+        obs = self.utils.normalize(next_states, mean_obs, std_obs, self.clip_normalization)        
         state_pred = self.rnd_predict(obs)
         state_target = self.rnd_target(obs)
         
@@ -316,9 +337,8 @@ class Agent:
         external_returns = self.utils.discounted(rewards).detach()
                     
         # Computing internal reward, then getting internal general advantages estimator
-        intrinsic_rewards = (state_target - state_pred).pow(2).mean(-1)        
-        intrinsic_advantage = self.utils.compute_GAE(in_value, intrinsic_rewards, next_in_value, dones)
-        intrinsic_advantage = self.utils.normalize(intrinsic_advantage).detach()
+        intrinsic_rewards = (state_target - state_pred).pow(2) / (std_in_rewards + 1e-8)
+        intrinsic_advantage = self.utils.compute_GAE(in_value, intrinsic_rewards, next_in_value, dones).detach()
         intrinsic_returns = self.utils.discounted(intrinsic_rewards).detach()
         
         # Getting overall advantages
@@ -328,7 +348,7 @@ class Agent:
         ex_vpredclipped = ex_old_value + torch.clamp(ex_value - ex_old_value, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
         ex_vf_losses1 = (external_returns - ex_value).pow(2) # Mean Squared Error
         ex_vf_losses2 = (external_returns - ex_vpredclipped).pow(2) # Mean Squared Error
-        critic_ext_loss = torch.min(ex_vf_losses1, ex_vf_losses2).mean()
+        critic_ext_loss = torch.max(ex_vf_losses1, ex_vf_losses2).mean()
 
         # Getting Intrinsic critic loss
         critic_int_loss = (intrinsic_returns - in_value).pow(2).mean()
@@ -359,7 +379,7 @@ class Agent:
         action = self.utils.sample(action_probs)       
         
         self.memory.save_actions(action)         
-        return action.item() 
+        return action.cpu().item() 
 
     # Update the RND part (the state and predictor)
     def update_rnd(self):
@@ -370,12 +390,18 @@ class Agent:
         
         # Optimize predictor for K epochs:
         for epoch in range(self.RND_epochs):                        
-            loss = self.get_rnd_loss(obs, mean_obs, std_obs)  
+            loss, intrinsic_rewards = self.get_rnd_loss(obs, mean_obs, std_obs)  
             
             self.rnd_predict_optimizer.zero_grad()
             loss.backward()                    
             self.rnd_predict_optimizer.step() 
-
+                    
+        # Update Intrinsic Rewards Normalization Parameter
+        self.memory.updateRwdNormalizationParam(intrinsic_rewards.mean(1))
+        
+        # Update Observation Normalization Parameter
+        self.memory.updateObsNormalizationParam()
+        
         # Clear the observation
         self.memory.clearObs()        
         
@@ -395,15 +421,16 @@ class Agent:
         # Getting value
         mean_obs = self.memory.mean_obs.detach()
         std_obs = self.memory.std_obs.detach()
+        std_in_rewards = self.memory.std_in_rewards.detach()
                 
         # Optimize policy for K epochs:
         for epoch in range(self.PPO_epochs):
-            loss = self.get_loss(mean_obs, std_obs, states, actions, rewards, next_states, dones)          
+            loss = self.get_loss(std_in_rewards, mean_obs, std_obs, states, actions, rewards, next_states, dones)          
                         
             self.policy_optimizer.zero_grad()
             loss.backward()                    
             self.policy_optimizer.step() 
-
+                
         # Clear state, action, reward in memory    
         self.memory.clearMemory()
         
@@ -449,24 +476,24 @@ def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_updat
     ############################################
     
     while not done:
-        # Running policy_old:
+        # Running policy_old:   
         action = int(agent.act(state))
-        state_n, reward, done, info = env.step(action)
+        next_state, reward, done, _ = env.step(action)
         
         t += 1
-        t_rnd += 1                           
-        total_reward += reward  
+        t_rnd += 1
+        total_reward += reward
           
-        if training_mode:
-            agent.save_eps(state, reward, state_n, done) 
-            agent.save_observation(state_n)
+        if training_mode:  
+            agent.save_eps(state, reward, next_state, done) 
+            agent.save_observation(next_state)
             
-        state = state_n     
+        state = next_state     
         
         if training_mode:
             if t_rnd == n_rnd_update:
                 agent.update_rnd()
-                print('RND has been updated')
+                #print('RND has been updated')
                 t_rnd = 0
         
         if render:
@@ -474,16 +501,15 @@ def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_updat
         if done:
             return total_reward, t, t_rnd
 
-def run_inits_episode(env, agent, render, n_init_episode):
+def run_inits_episode(env, agent, state_dim, render, n_init_episode):
     utils = Utils()
-    obs = []
     ############################################
-    state_val = env.reset()
+    env.reset()
 
     for i in range(n_init_episode):
         action = env.action_space.sample()
-        state_n, _, done, _ = env.step(action)
-        obs.append(state_n)
+        next_state, _, done, _ = env.step(action)
+        agent.save_observation(next_state)
 
         if render:
             env.render()
@@ -491,14 +517,8 @@ def run_inits_episode(env, agent, render, n_init_episode):
         if done:
             env.reset()
 
-    obs = torch.FloatTensor(obs).to(device).detach()
-    agent.memory.mean_obs = torch.mean(obs, 0, True)
-    agent.memory.std_obs = torch.std(obs, 0, True)
-
-    print('mean_obs : ', agent.memory.mean_obs)
-    print('std_obs : ', agent.memory.std_obs)
-
-    return agent
+    agent.memory.updateObsNormalizationParam()
+    agent.memory.clearObs()
     
 def main():
     ############## Hyperparameters ##############
@@ -512,15 +532,15 @@ def main():
     n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
     n_rnd_update = 128 # How many episode before you update the RND
-    n_episode = 1000 # How many episode you want to run
-    n_init_episode = 2048
+    n_episode = 10000 # How many episode you want to run
+    n_init_episode = 1024
 
     mean_obs = None
     std_obs = None
     #############################################         
-    env_name = "Env name"
+    env_name = "Env Name"
     env = gym.make(env_name)
-    state_dim = env.observation_space.shape[0]
+    state_dim = env.observation_space.n
     action_dim = env.action_space.n
         
     utils = Utils()     
@@ -544,14 +564,7 @@ def main():
     #############################################
 
     if training_mode:
-        if mean_obs and std_obs:
-            agent.memory.mean_obs = torch.FloatTensor([mean_obs]).to(device).detach()
-            agent.memory.std_obs = torch.FloatTensor([std_obs]).to(device).detach()
-            print('Init obs normalization parameter manually')
-        else:
-            print('Start running initial episode')
-            agent = run_inits_episode(env, agent, render, n_init_episode)
-            print('Finish running initial episode')
+        run_inits_episode(env, agent, state_dim, render, n_init_episode)
 
     #############################################
     
@@ -566,11 +579,11 @@ def main():
 
     #############################################
     
-    for i_episode in range(1, n_episode):
+    for i_episode in range(1, n_episode + 1):
         total_reward, time, t_rnd = run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_update)
-        print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, total_reward, time))
+        print('Episode {} \t t_reward: {} \t time: {} '.format(i_episode, total_reward, time))
         batch_rewards.append(total_reward)
-        batch_times.append(time)       
+        batch_times.append(time) 
         
         if training_mode:
             # update after n episodes
@@ -585,10 +598,10 @@ def main():
         if reward_threshold:
             if len(batch_solved_reward) == 100:            
                 if np.mean(batch_solved_reward) >= reward_threshold :              
-                    for reward in batch_times:
+                    for reward in batch_rewards:
                         rewards.append(reward)
 
-                    for time in batch_rewards:
+                    for time in batch_times:
                         times.append(time)                    
 
                     print('You solved task after {} episode'.format(len(rewards)))

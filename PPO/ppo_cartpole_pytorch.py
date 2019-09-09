@@ -198,7 +198,7 @@ class Agent:
         vpredclipped = old_values + torch.clamp(values - old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
         vf_losses1 = (returns - values).pow(2) # Mean Squared Error
         vf_losses2 = (returns - vpredclipped).pow(2) # Mean Squared Error
-        critic_loss = torch.min(vf_losses1, vf_losses2).mean() * 0.5
+        critic_loss = torch.max(vf_losses1, vf_losses2).mean() * 0.5
 
         # Finding the ratio (pi_theta / pi_theta__old):  
         logprobs = self.utils.logprob(action_probs, actions) 

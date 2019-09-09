@@ -16,9 +16,7 @@ class PPO_Model(nn.Module):
         
         # Actor
         self.actor_layer = nn.Sequential(
-                nn.Linear(state_dim, 640),
-                nn.ReLU(),
-                nn.Linear(640, 200),
+                nn.Linear(state_dim, 200),
                 nn.ReLU(),
                 nn.Linear(200, 200),
                 nn.ReLU(),
@@ -28,9 +26,7 @@ class PPO_Model(nn.Module):
         
         # Intrinsic Critic
         self.value_layer = nn.Sequential(
-                nn.Linear(state_dim, 640),
-                nn.ReLU(),
-                nn.Linear(640, 200),
+                nn.Linear(state_dim, 200),
                 nn.ReLU(),
                 nn.Linear(200, 200),
                 nn.ReLU(),
@@ -122,7 +118,7 @@ class Utils:
             
         return torch.stack(returns)
       
-    def q_values(self, reward, next_value, done):
+    def q_values(self, reward, next_value, done, value_function):
         # Finding Q Values
         # Q = R + V(St+1)
         q_values = reward + (1 - done) * self.gamma * next_value           
@@ -189,7 +185,7 @@ class Agent:
         vpredclipped = old_values + torch.clamp(values - old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
         vf_losses1 = (returns - values).pow(2) # Mean Squared Error
         vf_losses2 = (returns - vpredclipped).pow(2) # Mean Squared Error
-        critic_loss = torch.min(vf_losses1, vf_losses2).mean() * 0.5
+        critic_loss = torch.max(vf_losses1, vf_losses2).mean() * 0.5
 
         # Finding the ratio (pi_theta / pi_theta__old):  
         logprobs = self.utils.logprob(action_probs, actions) 
@@ -240,12 +236,12 @@ class Agent:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), 'actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), 'old_actor_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))   
+        self.policy.load_state_dict(torch.load('actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('old_actor_pong_ppo_rnd.pth'))   
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
@@ -276,9 +272,15 @@ def run_episode(env, agent, state_dim, render, training_mode):
     ############################################
     
     while not done:
-        # Running policy_old:            
-        action = int(agent.act(state))
-        next_state, reward, done, info = env.step(action)
+        action = int(agent.act(state))        
+        if action == 1:
+            action_gym = 2 # Up
+        elif action == 2:
+            action_gym = 3 # Down
+        elif action == 0: 
+            action_gym = 0 # Nothing / Stay       
+        
+        next_state, reward, done, info = env.step(action_gym)
         next_state = utils.prepro(next_state)
         next_state = next_state - state
         
@@ -297,21 +299,21 @@ def run_episode(env, agent, state_dim, render, training_mode):
     
 def main():
     ############## Hyperparameters ##############
-    using_google_drive = True # If you using Google Colab and want to save the agent to your GDrive, set this to True
+    using_google_drive = False # If you using Google Colab and want to save the agent to your GDrive, set this to True
     load_weights = True # If you want to load the agent, set this to True
-    save_weights = True # If you want to save the agent, set this to True
-    training_mode = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
+    save_weights = False # If you want to save the agent, set this to True
+    training_mode = False # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
     reward_threshold = 20 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     
-    render = False # If you want to display the image. Turn this off if you run this in Google Collab
+    render = True # If you want to display the image. Turn this off if you run this in Google Collab
     n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
     n_episode = 10000 # How many episode you want to run
     #############################################         
-    env_name = "Pong-v0"
+    env_name = "PongDeterministic-v4"
     env = gym.make(env_name)
     state_dim = 6400
-    action_dim = env.action_space.n
+    action_dim = 3
         
     utils = Utils()     
     agent = Agent(state_dim, action_dim)  
@@ -324,9 +326,9 @@ def main():
     if load_weights:
         agent.load_weights()
         print('Weight Loaded')
-    else :
+    '''else :
         agent.lets_init_weights()
-        print('Init Weight')
+        print('Init Weight')'''
     
     if torch.cuda.is_available() :
         print('Using GPU')
@@ -340,18 +342,19 @@ def main():
 
     total_time = 0
     
-    for i_episode in range(1, n_episode):
+    for i_episode in range(1, n_episode + 1):
         total_reward, time = run_episode(env, agent, state_dim, render, training_mode)
         print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, int(total_reward), time))
         batch_rewards.append(int(total_reward))
         batch_times.append(time)
 
-        if i_episode % n_update == 0:
-            agent.update_ppo()
-
-            if save_weights:
-                agent.save_weights()  
-                print('weights saved')
+        if training_mode:
+            if i_episode % n_update == 0:
+                agent.update_ppo()
+        
+        if save_weights:
+            agent.save_weights()  
+            print('weights saved')
                             
         if reward_threshold:
             if len(batch_solved_reward) == 100:            
