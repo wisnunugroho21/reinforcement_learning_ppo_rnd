@@ -53,10 +53,6 @@ RND incentivizes visiting unfamiliar states by measuring how hard it is to predi
 
 You can read full detail of RND in [here](https://openai.com/blog/reinforcement-learning-with-prediction-based-rewards/)
 
-## PPO RND vs PPO RND 2
-
-You will notice there are 2 folder of PPO RND. In the second version, there are observation and reward normalization. These are absence in first version. 
-
 ## Result
 
 ### LunarLander using PPO (Non RND)
