@@ -2,7 +2,7 @@
 
 # PPO-RND
 
-Simple code to demonstrate Reinforcement Learning using Proximal Policy Optimization and Random Network Distillation
+Simple code to demonstrate Reinforcement Learning using Proximal Policy Optimization and Random Network Distillation using Tensorflow 2 and Pytorch
 
 ## Getting Started
 
@@ -12,8 +12,12 @@ Although it's not required, but i recommend run this project on a PC with GPU an
 ### Prerequisites
 
 Make sure you have installed Pytorch and Gym.  
-- Click [here](https://pytorch.org/get-started/locally/) to install pytorch  
 - Click [here](https://gym.openai.com/docs/) to install gym
+
+You can use either Pytorch or Tensorflow 2
+- Click [here](https://pytorch.org/get-started/locally/) to install pytorch
+- Click [here](https://www.tensorflow.org/install) to install tensorflow 2
+
 
 ### Installing
 
@@ -27,9 +31,16 @@ git clone https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd.git
 
 After you clone the project, run following script in cmd/terminal :
 
+#### Pytorch version
 ```
-cd reinforcement_learning_ppo_rnd/PPO_RND
-python ppo_rnd_cartpole_pytorch.py
+cd reinforcement_learning_ppo_rnd/PPO_RND/pytorch
+python ppo_rnd_2_taxi_final_blow.py
+```
+
+#### Tensorflow 2 version
+```
+cd reinforcement_learning_ppo_rnd/PPO_RND/'tensorflow 2'
+python ppo_taxi_final_blow_tensorflow.py
 ```
 
 ## Proximal Policy Optimization
@@ -62,10 +73,6 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 | ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/giphy1.gif)  | ![Award Progress Graph](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/lunarlander_ppo.png)  |
 
 ## Future Development
-
-I really want to adapt this code to Tensorflow  
-But I think it's better to wait for Tensorflow 2.0 to be fully released
-
 For now, I focus on how to implement this project on more difficult environment (Atari games, Roboschool, etc)
 
 ## Contributing
