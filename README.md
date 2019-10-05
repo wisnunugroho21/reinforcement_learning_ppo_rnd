@@ -70,7 +70,15 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 
 | Result Gif  | Award Progress Graph |
 | ------------- | ------------- |
-| ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/giphy1.gif)  | ![Award Progress Graph](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/lunarlander_ppo.png)  |
+| ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/lunarlander.gif)  | ![Award Progress Graph](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/lunarlander_ppo.png)  |
+
+### Bipedal using PPO (Non RND)
+
+| Result Gif    |
+| ------------- |
+| ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/bipedal.gif) |
+
+
 
 ## Future Development
 For now, I focus on how to implement this project on more difficult environment (Atari games, Roboschool, etc)
