@@ -74,8 +74,10 @@ class Utils:
         self.gamma = 0.99
         self.lam = 0.95
 
-    # Categorical Distribution is used for Discrete Action Environment
-    # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
+    # If you want to create Agent for Continous Action Environment, you must find the proper Distribution for it (Some people use Multivariate Gaussian Distribution)
+    # and making the neural network output directly the action, not probability (Deterministic policy).
+    
+    # This link may will help you : https://www.reddit.com/r/learnmachinelearning/comments/8gp7ze/rl_in_continuous_action_space_how_to_predict_the/
     
     def sample(self, mean, cov_mat):
         distribution = tfp.distributions.MultivariateNormalDiag(mean, cov_mat)

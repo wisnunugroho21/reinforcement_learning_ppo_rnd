@@ -13,8 +13,8 @@ class Actor_Model(Model):
     def __init__(self, state_dim, action_dim):
         super(Actor_Model, self).__init__()
         
-        self.layer_actor_1 = Dense(32, activation='relu', name = 'a1')
-        self.layer_actor_2 = Dense(32, activation='relu', name = 'a2')
+        self.layer_actor_1 = Dense(64, activation='relu', name = 'a1')
+        self.layer_actor_2 = Dense(64, activation='relu', name = 'a2')
         self.layer_actor_out = Dense(action_dim, activation='softmax', name = 'a3')
         
     def call(self, states):
@@ -26,8 +26,8 @@ class Critic_Model(Model):
     def __init__(self, state_dim, action_dim):
         super(Critic_Model, self).__init__()
         
-        self.layer_critic_1 = Dense(32, activation='relu', name = 'c1')
-        self.layer_critic_2 = Dense(32, activation='relu', name = 'c2')
+        self.layer_critic_1 = Dense(64, activation='relu', name = 'c1')
+        self.layer_critic_2 = Dense(64, activation='relu', name = 'c2')
         self.layer_critic_out = Dense(1, activation='linear', name = 'c3')
         
     def call(self, states):
@@ -133,14 +133,15 @@ class Utils:
         return X
       
 class Agent:  
-    def __init__(self, state_dim, action_dim):        
+    def __init__(self, state_dim, action_dim, is_training_mode):        
         self.policy_clip = 0.1 
         self.value_clip = 0.1    
         self.entropy_coef = 0.01
         self.vf_loss_coef = 0.5
-        self.minibatch = 4
-        
+        self.minibatch = 4        
         self.PPO_epochs = 4
+        
+        self.is_training_mode = is_training_mode
                 
         self.actor = Actor_Model(state_dim, action_dim)
         self.actor_old = Actor_Model(state_dim, action_dim)
@@ -183,8 +184,7 @@ class Agent:
         
         # Finding Surrogate Loss
         ratios = tf.math.exp(logprobs - Old_logprobs) # ratios = old_logprobs / logprobs        
-        surr1 = ratios * Advantages        
-                
+        surr1 = ratios * Advantages  
         surr2 = tf.clip_by_value(ratios, 1 - self.policy_clip, 1 + self.policy_clip) * Advantages
         pg_loss = tf.math.reduce_mean(tf.math.minimum(surr1, surr2))         
                         
@@ -196,10 +196,14 @@ class Agent:
     @tf.function
     def act(self, state):
         state = tf.expand_dims(tf.cast(state, dtype = tf.float32), 0)
-        action_probs = self.actor(state)
+        action_probs = self.actor(state)                   
         
-        # Sample the action
-        action = self.utils.sample(action_probs)         
+        if self.is_training_mode:
+            # Sample the action
+            action = self.utils.sample(action_probs)
+        else:
+            action = tf.math.argmax(action_probs)
+        
         return action    
     
     @tf.function
@@ -225,6 +229,18 @@ class Agent:
         # Copy new weights into old policy:
         self.actor_old.set_weights(self.actor.get_weights())
         self.critic_old.set_weights(self.critic.get_weights())
+        
+    def save_weights(self):
+        self.actor.save_weights('/test/My Drive/LunarLander/actor_pong_ppo_rnd.hd5')
+        self.actor_old.save_weights('/test/My Drive/LunarLander/actor_old_pong_ppo_rnd.hd5')
+        self.critic.save_weights('/test/My Drive/LunarLander/critic_pong_ppo_rnd.hd5')
+        self.critic_old.save_weights('/test/My Drive/LunarLander/critic_old_pong_ppo_rnd.hd5')
+        
+    def load_weights(self):
+        self.actor.load_weights('/test/My Drive/LunarLander/actor_pong_ppo_rnd.hd5')
+        self.actor_old.load_weights('/test/My Drive/LunarLander/actor_old_pong_ppo_rnd.hd5')
+        self.critic.load_weights('/test/My Drive/LunarLander/critic_pong_ppo_rnd.hd5')
+        self.critic_old.load_weights('/test/My Drive/LunarLander/critic_old_pong_ppo_rnd.hd5')
         
 def plot(datas):
     print('----------')
@@ -274,9 +290,9 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     
 def main():
     ############## Hyperparameters ##############
-    using_google_drive = False # If you using Google Colab and want to save the agent to your GDrive, set this to True
+    using_google_drive = True # If you using Google Colab and want to save the agent to your GDrive, set this to True
     load_weights = False # If you want to load the agent, set this to True
-    save_weights = False # If you want to save the agent, set this to True
+    save_weights = True # If you want to save the agent, set this to True
     training_mode = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
     reward_threshold = 200 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     
@@ -288,16 +304,20 @@ def main():
     env_name = 'LunarLander-v2'
     env = gym.make(env_name)
     
-    if using_google_drive:
-        from google.colab import drive
-        drive.mount('/test')
-    
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
         
     utils = Utils()     
-    agent = Agent(state_dim, action_dim)  
-    #############################################         
+    agent = Agent(state_dim, action_dim, training_mode)  
+    ############################################# 
+    
+    if using_google_drive:
+        from google.colab import drive
+        drive.mount('/test')
+        
+    if load_weights:
+        agent.load_weights()
+        print('Weight Loaded')
     
     rewards = []   
     batch_rewards = []
