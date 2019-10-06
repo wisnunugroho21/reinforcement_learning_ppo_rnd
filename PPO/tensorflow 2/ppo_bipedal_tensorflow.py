@@ -188,8 +188,7 @@ class Agent:
         
         # Finding Surrogate Loss
         ratios = tf.math.exp(logprobs - Old_logprobs) # ratios = old_logprobs / logprobs        
-        surr1 = ratios * Advantages        
-                
+        surr1 = ratios * Advantages
         surr2 = tf.clip_by_value(ratios, 1 - self.policy_clip, 1 + self.policy_clip) * Advantages
         pg_loss = tf.math.reduce_mean(tf.math.minimum(surr1, surr2))         
                         
@@ -230,7 +229,7 @@ class Agent:
             for states, actions, rewards, dones, next_states in self.memory.get_all_items().batch(batch_size):
                 self.training_ppo(states, actions, rewards, dones, next_states)
                     
-        # Delete memory
+        # Clear the memory
         self.memory.clearMemory()
                 
         # Copy new weights into old policy:

@@ -225,7 +225,7 @@ class Agent:
             for states, actions, rewards, dones, next_states in self.memory.get_all_items().batch(batch_size):
                 self.training_ppo(states, actions, rewards, dones, next_states)
                     
-        # Delete memory
+        # Clear the memory
         self.memory.clearMemory()
                 
         # Copy new weights into old policy:
