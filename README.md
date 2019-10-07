@@ -78,6 +78,12 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 | ------------- |
 | ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/bipedal.gif) |
 
+### Pendulum using PPO (Non RND)
+
+| Result Gif  | Award Progress Graph |
+| ------------- | ------------- |
+| ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/pendulum.gif)  | ![Award Progress Graph](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/ppo_pendulum_tf2.png)  |
+
 ## Future Development
 For now, I focus on how to implement this project on more difficult environment (Atari games, Roboschool, etc)
 
