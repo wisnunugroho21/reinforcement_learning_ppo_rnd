@@ -1,5 +1,3 @@
-
-
 # PPO-RND
 
 Simple code to demonstrate Reinforcement Learning using Proximal Policy Optimization and Random Network Distillation using Tensorflow 2 and Pytorch
@@ -88,5 +86,4 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 For now, I focus on how to implement this project on more difficult environment (Atari games, Roboschool, etc)
 
 ## Contributing
-
 This project is far from finish and will be improved anytime . Any fix, contribute, or idea would be very appreciated

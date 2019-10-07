@@ -268,11 +268,12 @@ class Agent:
         old_action_probs, in_old_values, ex_old_values  = self.actor_old(states), self.critic_in_old(states), self.critic_ex_old(states)
         next_in_values, next_ex_values  = self.critic_in(next_states), self.critic_ex(next_states) 
         
+        # Normalize the observation
         obs = self.utils.normalize(next_states, mean_obs, std_obs, self.clip_normalization)
         state_pred = self.rnd_predict(obs)
         state_target = self.rnd_target(obs) 
         
-        # Don't update old value
+        # Don't use old value in backpropagation
         In_Old_Values = tf.stop_gradient(in_old_values)
         Ex_Old_Values = tf.stop_gradient(ex_old_values)
         
@@ -314,7 +315,7 @@ class Agent:
         pg_loss = tf.math.reduce_mean(tf.math.minimum(surr1, surr2))         
                         
         # We need to maximaze Policy Loss to make agent always find Better Rewards
-        # and minimize Critic Loss and 
+        # and minimize Critic Loss 
         loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss
         return loss       
       
@@ -323,8 +324,13 @@ class Agent:
         state = tf.expand_dims(tf.cast(state, dtype = tf.float32), 0)
         action_probs = self.actor(state)
         
-        # Sample the action
-        action = self.utils.sample(action_probs)         
+        # We don't need sample the action in Test Mode
+        # only sampling the action in Training Mode in order to exploring the actions
+        if self.is_training_mode:
+            # Sample the action
+            action = self.utils.sample(action_probs)
+        else:
+            action = tf.math.argmax(action_probs)         
         return action    
     
     # Get loss and Do backpropagation for PPO part (the actor and critic)
@@ -383,7 +389,7 @@ class Agent:
             for states, actions, rewards, dones, next_states in self.memory.get_all_items().batch(batch_size):
                 self.training_ppo(std_in_rewards, mean_obs, std_obs, states, actions, rewards, dones, next_states)
                     
-        # Delete memory
+        # Clear the memory
         self.memory.clearMemory()
                 
         # Copy new weights into old policy:
@@ -434,6 +440,8 @@ def run_episode(env, agent, state_dim, render, t_rnd, training_mode, n_rnd_updat
             
         state = state_n     
         
+        # Update the RND for every n_rnd_update
+        # RND will be updated non-episodically
         if training_mode:
             if t_rnd == n_rnd_update:
                 agent.update_rnd()
@@ -522,6 +530,8 @@ def main():
         batch_rewards.append(total_reward)
         batch_times.append(time) 
         
+        # Update the PPO at the end of episode
+        # PPO will be updated episodically
         if training_mode:
             # update after n episodes
             if i_episode % n_update == 0 and i_episode != 0:

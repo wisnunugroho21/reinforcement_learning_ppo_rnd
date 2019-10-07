@@ -166,7 +166,7 @@ class Agent:
         old_action_mean, old_values = self.actor_old(states), self.critic_old(states)
         next_values  = self.critic(next_states)  
                 
-        # Don't update old value
+        # Don't use old value in backpropagation
         Old_values = tf.stop_gradient(old_values)
         
         # Getting external general advantages estimator
@@ -188,13 +188,12 @@ class Agent:
         
         # Finding Surrogate Loss
         ratios = tf.math.exp(logprobs - Old_logprobs) # ratios = old_logprobs / logprobs        
-        surr1 = ratios * Advantages        
-                
+        surr1 = ratios * Advantages
         surr2 = tf.clip_by_value(ratios, 1 - self.policy_clip, 1 + self.policy_clip) * Advantages
         pg_loss = tf.math.reduce_mean(tf.math.minimum(surr1, surr2))         
                         
         # We need to maximaze Policy Loss to make agent always find Better Rewards
-        # and minimize Critic Loss and 
+        # and minimize Critic Loss 
         loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss
         return loss       
       
@@ -203,6 +202,8 @@ class Agent:
         state = tf.expand_dims(tf.cast(state, dtype = tf.float32), 0)        
         action_mean = self.actor(state)
         
+        # We don't need sample the action in Test Mode
+        # only sampling the action in Training Mode in order to exploring the actions        
         if self.is_training_mode:
             # Sample the action
             action = self.utils.sample(action_mean, self.cov_mat)
@@ -210,6 +211,7 @@ class Agent:
             action = action_mean
         return tf.squeeze(action)   
     
+    # Get loss and Do backpropagation
     @tf.function
     def training_ppo(self, states, actions, rewards, dones, next_states):        
         with tf.GradientTape() as tape:
@@ -218,7 +220,7 @@ class Agent:
         gradients = tape.gradient(loss, self.actor.trainable_variables + self.critic.trainable_variables)        
         self.optimizer.apply_gradients(zip(gradients, self.actor.trainable_variables + self.critic.trainable_variables)) 
         
-    # Update the PPO part (the actor and value)
+    # Update the model
     def update_ppo(self):        
         batch_size = int(self.memory.length() / self.minibatch)
         
@@ -227,7 +229,7 @@ class Agent:
             for states, actions, rewards, dones, next_states in self.memory.get_all_items().batch(batch_size):
                 self.training_ppo(states, actions, rewards, dones, next_states)
                     
-        # Delete memory
+        # Clear the memory
         self.memory.clearMemory()
                 
         # Copy new weights into old policy:
