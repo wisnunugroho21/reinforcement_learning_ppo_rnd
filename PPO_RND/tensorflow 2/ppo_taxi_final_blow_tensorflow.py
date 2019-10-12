@@ -13,8 +13,8 @@ class Actor_Model(Model):
     def __init__(self, state_dim, action_dim):
         super(Actor_Model, self).__init__()
         
-        self.layer_actor_1 = Dense(100, activation='relu', name = 'a1')
-        self.layer_actor_2 = Dense(100, activation='relu', name = 'a2')
+        self.layer_actor_1 = Dense(64, activation='relu', name = 'a1')
+        self.layer_actor_2 = Dense(64, activation='relu', name = 'a2')
         self.layer_actor_out = Dense(action_dim, activation='softmax', name = 'a3')
         
     def call(self, states):
@@ -26,8 +26,8 @@ class Critic_In_Model(Model):
     def __init__(self, state_dim, action_dim):
         super(Critic_In_Model, self).__init__()
         
-        self.layer_critic_1 = Dense(100, activation='relu', name = 'c1')
-        self.layer_critic_2 = Dense(100, activation='relu', name = 'c2')
+        self.layer_critic_1 = Dense(64, activation='relu', name = 'c1')
+        self.layer_critic_2 = Dense(64, activation='relu', name = 'c2')
         self.layer_critic_out = Dense(1, activation='linear', name = 'c3')
         
     def call(self, states):
@@ -39,8 +39,8 @@ class Critic_Ex_Model(Model):
     def __init__(self, state_dim, action_dim):
         super(Critic_Ex_Model, self).__init__()
         
-        self.layer_critic_1 = Dense(100, activation='relu', name = 'c1')
-        self.layer_critic_2 = Dense(100, activation='relu', name = 'c2')
+        self.layer_critic_1 = Dense(64, activation='relu', name = 'c1')
+        self.layer_critic_2 = Dense(64, activation='relu', name = 'c2')
         self.layer_critic_out = Dense(1, activation='linear', name = 'c3')
         
     def call(self, states):
@@ -52,8 +52,8 @@ class RND_Predictor_Model(Model):
     def __init__(self, state_dim, action_dim):
         super(RND_Predictor_Model, self).__init__()
         
-        self.layer_critic_1 = Dense(100, activation='relu', name = 'c1')
-        self.layer_critic_2 = Dense(100, activation='relu', name = 'c2')
+        self.layer_critic_1 = Dense(64, activation='relu', name = 'c1')
+        self.layer_critic_2 = Dense(64, activation='relu', name = 'c2')
         self.layer_critic_out = Dense(1, activation='linear', name = 'c3')
         
     def call(self, states):
@@ -65,8 +65,8 @@ class RND_Target_Model(Model):
     def __init__(self, state_dim, action_dim):
         super(RND_Target_Model, self).__init__()
         
-        self.layer_critic_1 = Dense(100, activation='relu', name = 'c1')
-        self.layer_critic_2 = Dense(100, activation='relu', name = 'c2')
+        self.layer_critic_1 = Dense(64, activation='relu', name = 'c1')
+        self.layer_critic_2 = Dense(64, activation='relu', name = 'c2')
         self.layer_critic_out = Dense(1, activation='linear', name = 'c3')
         
     def call(self, states):
@@ -82,8 +82,8 @@ class Memory:
         self.dones = []     
         self.next_states = []
         self.observation = []
-        self.mean_obs = tf.zeros(state_dim)
-        self.std_obs = tf.zeros(state_dim)
+        self.mean_obs = tf.zeros(state_dim, dtype = tf.float32)
+        self.std_obs = tf.zeros(state_dim, dtype = tf.float32)
         self.std_in_rewards = tf.constant([0], dtype = tf.float32)
         self.total_number_obs = tf.constant([0], dtype = tf.float32)
         self.total_number_rwd = tf.constant([0], dtype = tf.float32)
@@ -97,6 +97,15 @@ class Memory:
         
     def save_observation(self, obs):
         self.observation.append(obs.tolist())
+        
+    def save_observation_normalize_parameter(self, mean_obs, std_obs, total_number_obs):
+        self.mean_obs = mean_obs
+        self.std_obs = std_obs
+        self.total_number_obs = total_number_obs
+        
+    def save_rewards_normalize_parameter(self, std_in_rewards, total_number_rwd):
+        self.std_in_rewards = std_in_rewards
+        self.total_number_rwd = total_number_rwd
         
     def clearObs(self):
         del self.observation[:]
@@ -125,18 +134,7 @@ class Memory:
       
     def get_all_obs(self):        
         obs = tf.constant(self.observation, dtype = tf.float32)        
-        return tf.data.Dataset.from_tensor_slices((obs))
-      
-    def updateObsNormalizationParam(self):
-        obs = tf.constant(self.observation, dtype = tf.float32)
-        
-        self.mean_obs = ((self.mean_obs * self.total_number_obs) + tf.math.reduce_sum(obs, 0)) / (self.total_number_obs + obs.shape[0])
-        self.std_obs = tf.math.sqrt(((tf.math.square(self.std_obs) * self.total_number_obs) + (tf.math.reduce_variance(obs, 0) * obs.shape[0])) / (self.total_number_obs + obs.shape[0]))
-        self.total_number_obs += len(obs)
-    
-    def updateRwdNormalizationParam(self, in_rewards): 
-        self.std_in_rewards = (((tf.math.square(self.std_in_rewards) * self.total_number_rwd) + tf.math.sqrt(tf.math.reduce_variance(in_rewards) * in_rewards.shape[0])) / (self.total_number_rwd + in_rewards.shape[0]))
-        self.total_number_rwd += len(in_rewards)
+        return tf.data.Dataset.from_tensor_slices((obs))    
         
 class Utils:
     def __init__(self):
@@ -208,13 +206,19 @@ class Utils:
         X = I.astype(np.float32).ravel() # Combine items in 1 array 
         return X
       
+    def updateNewMean(self, prevMean, prevLen, newData):
+        return ((prevMean * prevLen) + tf.math.reduce_sum(newData, 0)) / (prevLen + newData.shape[0])
+      
+    def updateNewStd(self, prevStd, prevLen, newData):
+        return tf.math.sqrt(((tf.math.square(prevStd) * prevLen) + (tf.math.reduce_variance(newData, 0) * newData.shape[0])) / (prevStd + newData.shape[0]))
+      
 class Agent:  
-    def __init__(self, state_dim, action_dim):        
+    def __init__(self, state_dim, action_dim, is_training_mode):        
         self.policy_clip = 0.1 
         self.value_clip = 1      
         self.entropy_coef = 0.001
         self.vf_loss_coef = 1
-        self.minibatch = 1
+        self.minibatch = 4
         
         self.PPO_epochs = 4
         self.RND_epochs = 4
@@ -223,6 +227,7 @@ class Agent:
         self.in_advantages_coef = 1
         
         self.clip_normalization = 5
+        self.is_training_mode = is_training_mode
                 
         self.actor = Actor_Model(state_dim, action_dim)
         self.actor_old = Actor_Model(state_dim, action_dim)
@@ -247,6 +252,21 @@ class Agent:
         
     def save_observation(self, obs):
         self.memory.save_observation(obs)
+        
+    def updateObsNormalizationParam(self):
+        obs = tf.constant(self.memory.observation, dtype = tf.float32)
+        
+        mean_obs = self.utils.updateNewMean(self.memory.mean_obs, self.memory.total_number_obs, obs)
+        std_obs = self.utils.updateNewStd(self.memory.std_obs, self.memory.total_number_obs, obs)
+        total_number_obs = len(obs) + self.memory.total_number_obs
+        
+        self.memory.save_observation_normalize_parameter(mean_obs, std_obs, total_number_obs)
+        
+    def updateRwdNormalizationParam(self, in_rewards):        
+        std_in_rewards = self.utils.updateNewStd(self.memory.std_in_rewards, self.memory.total_number_rwd, in_rewards)
+        total_number_rwd = len(in_rewards) + self.memory.total_number_rwd
+        
+        self.memory.save_rewards_normalize_parameter(std_in_rewards, total_number_rwd)
         
     # Loss for RND 
     def get_rnd_loss(self, obs, mean_obs, std_obs):
@@ -367,10 +387,10 @@ class Agent:
                 intrinsic_rewards = self.training_rnd(obs, mean_obs, std_obs) 
                     
         # Update Intrinsic Rewards Normalization Parameter
-        self.memory.updateRwdNormalizationParam(tf.math.reduce_mean(intrinsic_rewards, 1))
+        self.updateRwdNormalizationParam(intrinsic_rewards)
         
         # Update Observation Normalization Parameter
-        self.memory.updateObsNormalizationParam()
+        self.updateObsNormalizationParam()
         
         # Clear the observation
         self.memory.clearObs()
@@ -472,7 +492,7 @@ def run_inits_episode(env, agent, state_dim, render, n_init_episode):
         if done:
             env.reset()
 
-    agent.memory.updateObsNormalizationParam()
+    agent.updateObsNormalizationParam()
     agent.memory.clearObs()
     
 def main():
@@ -486,9 +506,9 @@ def main():
     render = False # If you want to display the image. Turn this off if you run this in Google Collab
     n_update = 1 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
-    n_rnd_update = 10 # How many episode before you update the RND
+    n_rnd_update = 128 # How many episode before you update the RND
     n_episode = 10000 # How many episode you want to run
-    n_init_episode = 128
+    n_init_episode = 1024
 
     mean_obs = None
     std_obs = None
@@ -499,7 +519,7 @@ def main():
     action_dim = env.action_space.n
         
     utils = Utils()     
-    agent = Agent(state_dim, action_dim)  
+    agent = Agent(state_dim, action_dim, training_mode)  
     ############################################# 
     
     if using_google_drive:
