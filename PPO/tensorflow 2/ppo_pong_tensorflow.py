@@ -132,13 +132,15 @@ class Utils:
         return X
       
 class Agent:  
-    def __init__(self, state_dim, action_dim):        
+    def __init__(self, state_dim, action_dim, is_training_mode):        
         self.policy_clip = 0.1 
         self.value_clip = 0.1    
         self.entropy_coef = 0.01
         self.vf_loss_coef = 1
-        self.minibatch = 4      
+        self.minibatch = 4        
         self.PPO_epochs = 4
+
+        self.is_training_mode = is_training_mode
                 
         self.actor = Actor_Model(state_dim, action_dim)
         self.actor_old = Actor_Model(state_dim, action_dim)
@@ -196,8 +198,13 @@ class Agent:
         state = tf.expand_dims(tf.cast(state, dtype = tf.float32), 0)
         action_probs = self.actor(state)
         
-        # Sample the action
-        action = self.utils.sample(action_probs)         
+        # We don't need sample the action in Test Mode
+        # only sampling the action in Training Mode in order to exploring the actions
+        if self.is_training_mode:
+            # Sample the action
+            action = self.utils.sample(action_probs)
+        else:
+            action = tf.math.argmax(action_probs)         
         return action    
     
     @tf.function
@@ -311,7 +318,7 @@ def main():
     action_dim = 3
         
     utils = Utils()     
-    agent = Agent(state_dim, action_dim)  
+    agent = Agent(state_dim, action_dim, training_mode)  
     #############################################  
     
     if using_google_drive:
