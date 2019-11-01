@@ -92,7 +92,7 @@ class Utils:
         data_normalized = (data - tf.math.reduce_mean(data)) / (tf.math.reduce_std(data) + 1e-8)
         return data_normalized     
       
-    def discounted(self, datas, dones):
+    def monte_carlo_discounted(self, datas, dones):
         # Discounting future reward        
         returns = []        
         running_add = 0
@@ -109,7 +109,7 @@ class Utils:
         TD = rewards + self.gamma * next_values * (1 - dones)        
         return TD
       
-    def compute_GAE(self, values, rewards, next_value, done):
+    def generalized_advantage_estimation(self, values, rewards, next_value, done):
         # Computing general advantages estimator
         gae = 0
         returns = []
@@ -165,7 +165,7 @@ class Agent:
         Old_values = tf.stop_gradient(old_values)
         
         # Getting external general advantages estimator
-        Advantages = tf.stop_gradient(self.utils.compute_GAE(values, rewards, next_values, dones))
+        Advantages = tf.stop_gradient(self.utils.generalized_advantage_estimation(values, rewards, next_values, dones))
         Returns = tf.stop_gradient(self.utils.temporal_difference(rewards, next_values, dones))
         
         # Finding the ratio (pi_theta / pi_theta__old):        

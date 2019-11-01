@@ -167,7 +167,7 @@ class Utils:
 
         return data_normalized     
       
-    def discounted(self, datas, dones):
+    def monte_carlo_discounted(self, datas, dones):
         # Discounting future reward        
         returns = []        
         running_add = 0
@@ -179,13 +179,12 @@ class Utils:
         return tf.stack(returns)
       
     def temporal_difference(self, rewards, next_values, dones):
-        # Finding TD Values
-        # TD = R + V(St+1)
+        # Computing temporal difference
         TD = rewards + self.gamma * next_values * (1 - dones)        
         return TD
       
-    def compute_GAE(self, values, rewards, next_value, done):
-        # Computing general advantages estimator
+    def generalized_advantage_estimation(self, values, rewards, next_value, done):
+        # Computing generalized advantages estimation
         gae = 0
         returns = []
         
@@ -195,16 +194,6 @@ class Utils:
             returns.insert(0, gae)
             
         return tf.stack(returns)
-      
-    def prepro(self, I):
-        I = I[35:195] # crop
-        I = I[::2,::2, 0] # downsample by factor of 2
-        I[I == 144] = 0 # erase background (background type 1)
-        I[I == 109] = 0 # erase background (background type 2)
-        I[I != 0] = 1 # everything else (paddles, ball) just set to 1
-        
-        X = I.astype(np.float32).ravel() # Combine items in 1 array 
-        return X
       
     def updateNewMean(self, prevMean, prevLen, newData):
         return ((prevMean * prevLen) + tf.math.reduce_sum(newData, 0)) / (prevLen + newData.shape[0])
@@ -299,11 +288,11 @@ class Agent:
         
         # Computing internal reward, then getting internal general advantages estimator
         Intrinsic_Rewards = tf.math.square(state_target - state_pred) / (std_in_rewards + 1e-8)
-        intrinsic_advantages = self.utils.compute_GAE(in_values, Intrinsic_Rewards, next_in_values, dones)
+        intrinsic_advantages = self.utils.generalized_advantage_estimation(in_values, Intrinsic_Rewards, next_in_values, dones)
         Intrinsic_Returns = tf.stop_gradient(self.utils.temporal_difference(Intrinsic_Rewards, next_in_values, dones))
         
         # Getting external general advantages estimator        
-        external_advantages = self.utils.compute_GAE(ex_values, rewards, next_ex_values, dones)
+        external_advantages = self.utils.generalized_advantage_estimation(ex_values, rewards, next_ex_values, dones)
         External_Returns = tf.stop_gradient(self.utils.temporal_difference(rewards, next_ex_values, dones))
         
         # Getting overall advantages

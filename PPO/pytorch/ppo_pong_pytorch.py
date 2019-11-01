@@ -107,7 +107,7 @@ class Utils:
             datas = datas.detach().numpy()            
         return datas        
       
-    def discounted(self, datas):
+    def monte_carlo_discounted(self, datas):
         # Discounting future reward        
         returns = []        
         running_add = 0
@@ -118,14 +118,13 @@ class Utils:
             
         return torch.stack(returns)
       
-    def q_values(self, reward, next_value, done, value_function):
-        # Finding Q Values
-        # Q = R + V(St+1)
-        q_values = reward + (1 - done) * self.gamma * next_value           
-        return q_values
+    def temporal_difference(self, rewards, next_values, dones):
+        # Computing temporal difference
+        TD = rewards + self.gamma * next_values * (1 - dones)        
+        return TD
       
-    def compute_GAE(self, values, rewards, next_value, done):
-        # Computing general advantages estimator
+    def generalized_advantage_estimation(self, values, rewards, next_value, done):
+        # Computing generalized advantages estimation
         gae = 0
         returns = []
         
@@ -178,8 +177,8 @@ class Agent:
         dist_entropy = self.utils.entropy(action_probs).mean()
 
         # Getting external general advantages estimator
-        advantages = self.utils.compute_GAE(values, rewards, next_values, dones).detach()
-        returns = self.utils.discounted(rewards).detach()
+        advantages = self.utils.generalized_advantage_estimation(values, rewards, next_values, dones).detach()
+        returns = self.utils.temporal_difference(rewards).detach()
         
         # Getting External critic loss by using Clipped critic value
         vpredclipped = old_values + torch.clamp(values - old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
@@ -263,8 +262,9 @@ def plot(datas):
 def run_episode(env, agent, state_dim, render, training_mode):
     utils = Utils()
     ############################################
-    state = env.reset()
-    state = utils.prepro(state)
+    obs = env.reset()
+    obs = utils.prepro(state)
+    state = obs
     
     done = False
     total_reward = 0
@@ -280,9 +280,9 @@ def run_episode(env, agent, state_dim, render, training_mode):
         elif action == 0: 
             action_gym = 0 # Nothing / Stay       
         
-        next_state, reward, done, info = env.step(action_gym)
-        next_state = utils.prepro(next_state)
-        next_state = next_state - state
+        next_obs, reward, done, info = env.step(action_gym)
+        next_obs = utils.prepro(next_obs)
+        next_state = next_obs - obs
         
         eps_time += 1 
         total_reward += reward 
@@ -290,7 +290,8 @@ def run_episode(env, agent, state_dim, render, training_mode):
         if training_mode:
             agent.save_eps(state, reward, action, done, next_state) 
             
-        state = next_state     
+        state = next_state
+        obs = next_obs     
                 
         if render:
             env.render()
