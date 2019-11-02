@@ -245,7 +245,6 @@ class Agent:
         self.value_clip = 1      
         self.entropy_coef = 0.001
         self.vf_loss_coef = 1
-
         self.PPO_epochs = 4
         self.RND_epochs = 4
         
