@@ -169,7 +169,7 @@ class Agent:
 
         # Getting external general advantages estimator
         advantages = self.utils.generalized_advantage_estimation(values, rewards, next_values, dones).detach()
-        returns = self.utils.temporal_difference(rewards).detach()
+        returns = self.utils.temporal_difference(rewards, next_values, dones).detach()
         
         # Getting External critic loss by using Clipped critic value
         vpredclipped = old_values + torch.clamp(values - old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
@@ -193,15 +193,16 @@ class Agent:
         return loss       
       
     def act(self, state):
-        state = torch.FloatTensor(state).to(device)      
-        action_probs = self.policy_old(state, is_act = True)
+        state = torch.FloatTensor(state).to(device)              
+        action_mean = self.policy_old(state, is_act = True)
+        cov_mat = torch.diag_embed(self.action_var).to(device).detach()
         
         if self.is_training_mode:
             # Sample the action
-            action = self.utils.sample(action_probs)
-            return action.cpu().item() 
+            action = self.utils.sample(action_mean, cov_mat)
+            return action.cpu().numpy()
         else:
-            return action_probs.cpu().numpy()
+            return action_mean.cpu().numpy()
         
     # Update the PPO part (the actor and value)
     def update_ppo(self):        
@@ -257,8 +258,6 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     utils = Utils()
     ############################################
     state = env.reset()
-    state = utils.prepro(state)
-
     done = False
     total_reward = 0
     t = 0
@@ -266,9 +265,8 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     
     while not done:
         # Running policy_old:            
-        action = int(agent.act(state))
+        action = agent.act(state)
         state_n, reward, done, info = env.step(action)
-        state_n = utils.prepro(state_n)
         
         t += 1                       
         total_reward += reward

@@ -145,12 +145,13 @@ class Utils:
         return torch.stack(returns)
         
 class Agent:  
-    def __init__(self, state_dim, action_dim):        
+    def __init__(self, state_dim, action_dim, is_training_mode):        
         self.policy_clip = 0.1 
         self.value_clip = 0.1      
         self.entropy_coef = 0.01
         self.vf_loss_coef = 0.5
         self.PPO_epochs = 5
+        self.is_training_mode = is_training_mode
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
@@ -176,7 +177,7 @@ class Agent:
 
         # Getting external general advantages estimator
         advantages = self.utils.generalized_advantage_estimation(values, rewards, next_values, dones).detach()
-        returns = self.utils.temporal_difference(rewards).detach()
+        returns = self.utils.temporal_difference(rewards, next_values, dones).detach()
         
         # Getting External critic loss by using Clipped critic value
         vpredclipped = old_values + torch.clamp(values - old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
@@ -203,9 +204,12 @@ class Agent:
         state = torch.FloatTensor(state).to(device)      
         action_probs = self.policy_old(state, is_act = True)
         
-        # Sample the action
-        action = self.utils.sample(action_probs)      
-        return action.cpu().item()
+        if self.is_training_mode:
+            # Sample the action
+            action = self.utils.sample(action_probs)
+            return action.cpu().item() 
+        else:
+            return action_probs.max(1)[1].view(1, 1)
         
     # Update the PPO part (the actor and value)
     def update_ppo(self):        
