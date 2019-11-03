@@ -56,27 +56,20 @@ class Memory:
     def __init__(self):
         self.actions = []
         self.states = []
-        self.logprobs = []
         self.rewards = []
         self.dones = []     
         self.next_states = []
         
-    def save_eps(self, state, reward, next_states, done):
+    def save_eps(self, state, reward, action, done, next_state):
         self.rewards.append(reward)
         self.states.append(state)
-        self.dones.append(done)
-        self.next_states.append(next_states)
-        
-    def save_actions(self, action):
         self.actions.append(action)
-        
-    def save_logprobs(self, logprob):
-        self.logprobs.append(logprob)
-        
+        self.dones.append(done)
+        self.next_states.append(next_state)
+                
     def clearMemory(self):
         del self.actions[:]
         del self.states[:]
-        del self.logprobs[:]
         del self.rewards[:]
         del self.dones[:]
         del self.next_states[:]
@@ -156,8 +149,8 @@ class Agent:
         self.memory = Memory()
         self.utils = Utils()        
         
-    def save_eps(self, state, reward, next_states, done):
-        self.memory.save_eps(state, reward, next_states, done)
+    def save_eps(self, state, reward, action, done, next_state):
+        self.memory.save_eps(state, reward, action, done, next_state)
         
     def save_observation(self, obs):
         self.memory.save_observation(obs)
@@ -286,7 +279,7 @@ def run_episode(env, agent, state_dim, render, training_mode):
         reward = -100 if done and t < 200 else 1    
           
         if training_mode:
-            agent.save_eps(state, reward, state_n, done) 
+            agent.save_eps(state, reward, action, done, next_state) 
             
         state = state_n     
                 
