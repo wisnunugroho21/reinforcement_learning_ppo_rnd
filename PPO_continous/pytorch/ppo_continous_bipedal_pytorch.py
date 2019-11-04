@@ -2,7 +2,7 @@ import gym
     
 import torch
 import torch.nn as nn
-from torch.distributions import Normal
+from torch.distributions import MultivariateNormal
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -18,6 +18,8 @@ class PPO_Model(nn.Module):
                 nn.Linear(state_dim, 64),
                 nn.Tanh(),
                 nn.Linear(64, 64),
+                nn.Tanh(),
+                nn.Linear(64, action_dim),
                 nn.Tanh()
               ).float().to(device)
         
@@ -29,12 +31,6 @@ class PPO_Model(nn.Module):
                 nn.Tanh(),
                 nn.Linear(64, 1)
               ).float().to(device)
-
-        self.mean_layer = nn.Sequential(
-                    nn.Linear(64, action_dim)).float().to(device)
-
-        self.log_std_layer = nn.Sequential(
-                    nn.Linear(64, action_dim)).float().to(device)
         
     # Init wieghts to make training faster
     # But don't init weight if you load weight from file
@@ -51,46 +47,35 @@ class PPO_Model(nn.Module):
         
     def forward(self, state, is_act = False, is_value = False):
         if is_act and not is_value: 
-            x = self.actor_layer(state)        
-            mean    = self.mean_layer(x)
-            log_std = self.log_std_layer(x)
-            log_std = torch.clamp(log_std, -20, 2) # Making sure log_std is not too far        
-            return mean, log_std
-
+            return self.actor_layer(state)
         elif is_value and not is_act:
             return self.value_layer(state)
-
         else:
-            x = self.actor_layer(state)        
-            mean    = self.mean_layer(x)
-            log_std = self.log_std_layer(x)
-            log_std = torch.clamp(log_std, -20, 2) # Making sure log_std is not too far
-            return mean, log_std, self.value_layer(state)
+            return self.actor_layer(state), self.value_layer(state)
 
 class Memory:
     def __init__(self):
         self.actions = []
         self.states = []
+        self.logprobs = []
         self.rewards = []
         self.dones = []     
         self.next_states = []
-        self.z = [] # Z is action before squashed by tanh
         
-    def save_eps(self, state, reward, action, done, next_state, z):
+    def save_eps(self, state, reward, action, done, next_state):
         self.rewards.append(reward)
         self.states.append(state.tolist())
         self.actions.append(action)
         self.dones.append(float(done))
         self.next_states.append(next_state.tolist())
-        self.z.append(z)
-                
+        
     def clearMemory(self):
         del self.actions[:]
         del self.states[:]
+        del self.logprobs[:]
         del self.rewards[:]
         del self.dones[:]
         del self.next_states[:]
-        del self.z[:]
                 
 class Utils:
     def __init__(self):
@@ -99,23 +84,20 @@ class Utils:
 
     # If you want to create Agent for Continous Action Environment, you must find the proper Distribution for it (Some people use Multivariate Gaussian Distribution)
     # and making the neural network output directly the action, not probability (Deterministic policy).
-
-    # std is not static number, but a number outputed by Policy Neural Network. 
-
+    
     # This link may will help you : https://www.reddit.com/r/learnmachinelearning/comments/8gp7ze/rl_in_continuous_action_space_how_to_predict_the/
     
-    def sample(self, mean, std):
-        distribution = Normal(mean, std)      
+    def sample(self, action_mean, cov_mat):
+        distribution = MultivariateNormal(action_mean, cov_mat)      
         return distribution.sample().float().to(device)
         
-    def entropy(self, mean, std):
-        distribution = Normal(mean, std)            
+    def entropy(self, action_mean, cov_mat):
+        distribution = MultivariateNormal(action_mean, cov_mat)            
         return distribution.entropy().float().to(device)
       
-    def logprob(self, mean, std, value_data):
-        action = torch.tanh(value_data)
-        distribution = Normal(mean, std)
-        return distribution.log_prob(value_data) - torch.log(1 - action.pow(2) + 1e-6) # The logprob must be modified because squashing function      
+    def logprob(self, action_mean, cov_mat, value_data):
+        distribution = MultivariateNormal(action_mean, cov_mat)
+        return distribution.log_prob(value_data).float().to(device)      
       
     def normalize(self, data):
         data_normalized = (data - torch.mean(data)) / torch.std(data)
@@ -157,7 +139,7 @@ class Utils:
         return torch.stack(returns)
         
 class Agent:  
-    def __init__(self, state_dim, action_dim, is_training_mode):        
+    def __init__(self, state_dim, action_dim, is_training_mode, action_std = 1):        
         self.policy_clip = 0.1 
         self.value_clip = 0.1      
         self.entropy_coef = 0.01
@@ -170,26 +152,24 @@ class Agent:
         self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001)
 
         self.memory = Memory()
-        self.utils = Utils()        
+        self.utils = Utils()     
+        self.action_var = torch.full((action_dim,), action_std * action_std).to(device)   
+        self.cov_mat = torch.diag_embed(self.action_var).to(device).detach()
         
-    def save_eps(self, state, reward, action, done, next_state, z):
-        self.memory.save_eps(state, reward, action, done, next_state, z)
+    def save_eps(self, state, reward, action, done, next_state):
+        self.memory.save_eps(state, reward, action, done, next_state)
 
     # Loss for PPO
-    def get_loss(self, states, actions, rewards, next_states, dones, z):  
-        action_mean, action_logstd, values  = self.policy(states)  
-        old_action_mean, old_action_logstd, old_values = self.policy_old(states)
+    def get_loss(self, states, actions, rewards, next_states, dones):  
+        action_mean, values  = self.policy(states)  
+        old_action_mean, old_values = self.policy_old(states)
         next_values  = self.policy(next_states, is_value = True)
-
-        # The output of Policy NN is log_std. Therefore, we must convert it to std via exp function
-        action_std = action_logstd.exp() 
-        old_action_std = old_action_logstd.exp()
         
         # Don't update old value
         old_values = old_values.detach()
                 
         # Getting entropy from the action probability
-        dist_entropy = self.utils.entropy(action_mean, action_std).mean()
+        dist_entropy = self.utils.entropy(action_mean, self.cov_mat).mean()
 
         # Getting external general advantages estimator
         advantages = self.utils.generalized_advantage_estimation(values, rewards, next_values, dones).detach()
@@ -202,8 +182,8 @@ class Agent:
         critic_loss = torch.max(vf_losses1, vf_losses2).mean() * 0.5
 
         # Finding the ratio (pi_theta / pi_theta__old):  
-        logprobs = self.utils.logprob(action_mean, action_std, z) 
-        old_logprobs = self.utils.logprob(old_action_mean, old_action_std, z).detach()
+        logprobs = self.utils.logprob(action_mean, self.cov_mat, actions) 
+        old_logprobs = self.utils.logprob(old_action_mean, self.cov_mat, actions).detach()
         
         # Finding Surrogate Loss:
         ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs
@@ -218,15 +198,15 @@ class Agent:
       
     def act(self, state):
         state = torch.FloatTensor(state).to(device)              
-        action_mean, action_logstd = self.policy_old(state, is_act = True)
-        action_std = action_logstd.exp()
+        action_mean = self.policy_old(state, is_act = True)
+        cov_mat = torch.diag_embed(self.action_var).to(device).detach()
         
         if self.is_training_mode:
             # Sample the action
-            z = self.utils.sample(action_mean, action_std)
-            return torch.tanh(z).cpu().numpy(), z.cpu().numpy()
+            action = self.utils.sample(action_mean, cov_mat)
+            return action.cpu().numpy()
         else:
-            return action_mean.cpu().numpy(), 0
+            return action_mean.cpu().numpy()
         
     # Update the PPO part (the actor and value)
     def update_ppo(self):        
@@ -238,11 +218,10 @@ class Agent:
         rewards = torch.FloatTensor(self.memory.rewards).view(length, 1).to(device).detach()
         dones = torch.FloatTensor(self.memory.dones).view(length, 1).to(device).detach()
         next_states = torch.FloatTensor(self.memory.next_states).to(device).detach()
-        z = torch.FloatTensor(self.memory.z).to(device).detach()
                 
         # Optimize policy for K epochs:
         for epoch in range(self.PPO_epochs):
-            loss = self.get_loss(states, actions, rewards, next_states, dones, z)          
+            loss = self.get_loss(states, actions, rewards, next_states, dones)          
                         
             self.policy_optimizer.zero_grad()
             loss.backward()                    
@@ -290,15 +269,15 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     
     while not done:
         # Running policy_old:            
-        action, z = agent.act(state)        
+        action = agent.act(state)
         state_n, reward, done, info = env.step(action)
-
+        
         t += 1                       
         total_reward += reward
         t_updates += 1   
           
         if training_mode:
-            agent.save_eps(state, reward, action, done, state_n, z) 
+            agent.save_eps(state, reward, action, done, state_n) 
             
         state = state_n     
                 

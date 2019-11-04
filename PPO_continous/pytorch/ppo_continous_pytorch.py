@@ -305,7 +305,7 @@ def main():
     n_plot_batch = 100 # How many episode you want to plot the result
     n_episode = 10000 # How many episode you want to run
     #############################################         
-    env_name = "BipedalWalker-v2"
+    env_name = env_name = "Env Name"
     env = gym.make(env_name)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
@@ -321,9 +321,9 @@ def main():
     if load_weights:
         agent.load_weights()
         print('Weight Loaded')
-    else :
+    '''else :
         agent.lets_init_weights()
-        print('Init Weight')
+        print('Init Weight')'''
     
     if torch.cuda.is_available() :
         print('Using GPU')

@@ -316,9 +316,9 @@ def main():
     if load_weights:
         agent.load_weights()
         print('Weight Loaded')
-    else :
+    '''else :
         agent.lets_init_weights()
-        print('Init Weight')
+        print('Init Weight')'''
     
     if torch.cuda.is_available() :
         print('Using GPU')

@@ -282,7 +282,7 @@ def run_episode(env, agent, state_dim, render, training_mode):
         state_n, reward, done, info = env.step(action)
         state_n = utils.prepro(state_n)
 
-        if reward == 0 and done :
+        '''if reward == 0 and done :
             total_reward -= fail_reward
 
         elif reward == 1 and done:
@@ -293,9 +293,10 @@ def run_episode(env, agent, state_dim, render, training_mode):
 
         else:
             total_reward -= travel_minus_reward  
-            cell_visited.append(state)
+            cell_visited.append(state)'''
         
-        t += 1  
+        t += 1
+        total_reward += reward
           
         if training_mode:
             next_state_val = to_categorical(state_n, num_classes = state_dim)  # One hot encoding for next state
@@ -337,9 +338,9 @@ def main():
     if load_weights:
         agent.load_weights()
         print('Weight Loaded')
-    else :
+    '''else :
         agent.lets_init_weights()
-        print('Init Weight')
+        print('Init Weight')'''
     
     if torch.cuda.is_available() :
         print('Using GPU')

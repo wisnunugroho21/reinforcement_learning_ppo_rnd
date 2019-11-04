@@ -146,7 +146,7 @@ class Agent:
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001)
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 2.5e-4)
 
         self.memory = Memory()
         self.utils = Utils()        
