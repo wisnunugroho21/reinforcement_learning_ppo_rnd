@@ -17,9 +17,9 @@ class PPO_Model(nn.Module):
         # Actor
         self.actor_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, action_dim),
                 nn.Softmax(-1)
               ).float().to(device)
@@ -27,9 +27,9 @@ class PPO_Model(nn.Module):
         # Intrinsic Critic
         self.value_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, 1)
               ).float().to(device)
         
@@ -46,9 +46,11 @@ class PPO_Model(nn.Module):
             elif 'weight' in name:
                 nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'relu')
         
-    def forward(self, state, is_act = False):
-        if is_act: 
+    def forward(self, state, is_act = False, is_value = False):
+        if is_act and not is_value: 
             return self.actor_layer(state)
+        elif is_value and not is_act: 
+            return self.value_layer(state)
         else:
             return self.actor_layer(state), self.value_layer(state)
 
@@ -56,7 +58,6 @@ class Memory:
     def __init__(self):
         self.actions = []
         self.states = []
-        self.logprobs = []
         self.rewards = []
         self.dones = []     
         self.next_states = []
@@ -67,11 +68,10 @@ class Memory:
         self.actions.append(action)
         self.dones.append(done)
         self.next_states.append(next_state)
-        
+                
     def clearMemory(self):
         del self.actions[:]
         del self.states[:]
-        del self.logprobs[:]
         del self.rewards[:]
         del self.dones[:]
         del self.next_states[:]
@@ -117,14 +117,14 @@ class Utils:
             returns.insert(0, running_add)
             
         return torch.stack(returns)
-      
+
     def temporal_difference(self, rewards, next_values, dones):
         # Computing temporal difference
         TD = rewards + self.gamma * next_values * (1 - dones)        
         return TD
       
     def generalized_advantage_estimation(self, values, rewards, next_value, done):
-        # Computing generalized advantages estimation
+        # Computing general advantages estimator
         gae = 0
         returns = []
         
@@ -136,12 +136,7 @@ class Utils:
         return torch.stack(returns)
 
     def prepro(self, I):
-        # Crop the image and convert it to Grayscale
-        # For more information : https://medium.com/@dhruvp/how-to-write-a-neural-network-to-play-pong-from-scratch-956b57d4f6e0
-
-        """ prepro 210x160x3 uint8 frame into 6400 (80x80) 1D float vector """
         I = I[35:195] # crop
-        #I = np.dot(I[...,:3], [0.2989, 0.5870, 0.1140])
         I = I[::2,::2, 0] # downsample by factor of 2
         I[I == 144] = 0 # erase background (background type 1)
         I[I == 109] = 0 # erase background (background type 2)
@@ -156,13 +151,12 @@ class Agent:
         self.value_clip = 0.1      
         self.entropy_coef = 0.01
         self.vf_loss_coef = 0.5
-        self.target_kl = 1
         self.is_training_mode = is_training_mode
-        self.PPO_epochs = 4
+        self.PPO_epochs = 5
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.0001)
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001)
 
         self.memory = Memory()
         self.utils = Utils()        
@@ -170,14 +164,11 @@ class Agent:
     def save_eps(self, state, reward, action, done, next_state):
         self.memory.save_eps(state, reward, action, done, next_state)
         
-    def save_observation(self, obs):
-        self.memory.save_observation(obs)
-
     # Loss for PPO
     def get_loss(self, states, actions, rewards, next_states, dones):      
         action_probs, values  = self.policy(states)  
         old_action_probs, old_values = self.policy_old(states)
-        _, next_values  = self.policy(next_states)
+        next_values  = self.policy(next_states, is_value = True)
         
         # Don't update old value
         old_values = old_values.detach()
@@ -252,11 +243,11 @@ class Agent:
         
     def load_weights(self):
         self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth'))   
+        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth')) 
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
-        self.policy_old.lets_init_weights()
+        self.policy_old.lets_init_weights() 
         
 def plot(datas):
     print('----------')

@@ -17,9 +17,9 @@ class PPO_Model(nn.Module):
         # Actor
         self.actor_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, action_dim),
                 nn.Softmax(-1)
               ).float().to(device)
@@ -27,9 +27,9 @@ class PPO_Model(nn.Module):
         # Intrinsic Critic
         self.value_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, 1)
               ).float().to(device)
         
@@ -46,9 +46,11 @@ class PPO_Model(nn.Module):
             elif 'weight' in name:
                 nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'relu')
         
-    def forward(self, state, is_act = False):
-        if is_act: 
+    def forward(self, state, is_act = False, is_value = False):
+        if is_act and not is_value: 
             return self.actor_layer(state)
+        elif is_value and not is_act: 
+            return self.value_layer(state)
         else:
             return self.actor_layer(state), self.value_layer(state)
 
@@ -66,7 +68,7 @@ class Memory:
         self.actions.append(action)
         self.dones.append(done)
         self.next_states.append(next_state)
-        
+                
     def clearMemory(self):
         del self.actions[:]
         del self.states[:]
@@ -115,7 +117,7 @@ class Utils:
             returns.insert(0, running_add)
             
         return torch.stack(returns)
-      
+
     def temporal_difference(self, rewards, next_values, dones):
         # Computing temporal difference
         TD = rewards + self.gamma * next_values * (1 - dones)        
@@ -139,7 +141,7 @@ class Agent:
         self.value_clip = 0.1      
         self.entropy_coef = 0.01
         self.vf_loss_coef = 0.5
-
+        self.is_training_mode = is_training_mode
         self.PPO_epochs = 5
         
         self.policy = PPO_Model(state_dim, action_dim)
@@ -152,14 +154,11 @@ class Agent:
     def save_eps(self, state, reward, action, done, next_state):
         self.memory.save_eps(state, reward, action, done, next_state)
         
-    def save_observation(self, obs):
-        self.memory.save_observation(obs)
-
     # Loss for PPO
     def get_loss(self, states, actions, rewards, next_states, dones):      
         action_probs, values  = self.policy(states)  
         old_action_probs, old_values = self.policy_old(states)
-        _, next_values  = self.policy(next_states)
+        next_values  = self.policy(next_states, is_value = True)
         
         # Don't update old value
         old_values = old_values.detach()
@@ -208,21 +207,16 @@ class Agent:
         length = len(self.memory.states)
 
         # Convert list in tensor
-        old_states = torch.FloatTensor(self.memory.states).to(device).detach()
-        old_actions = torch.FloatTensor(self.memory.actions).to(device).detach()
-        old_next_states = torch.FloatTensor(self.memory.next_states).to(device).detach()
-        dones = torch.FloatTensor(self.memory.dones).view(length, 1).view(length, 1).to(device).detach() 
-        rewards = torch.FloatTensor(self.memory.rewards).view(length, 1).view(length, 1).to(device).detach()
+        states = torch.FloatTensor(self.memory.states).to(device).detach()
+        actions = torch.FloatTensor(self.memory.actions).to(device).detach()
+        rewards = torch.FloatTensor(self.memory.rewards).view(length, 1).to(device).detach()
+        dones = torch.FloatTensor(self.memory.dones).view(length, 1).to(device).detach()
+        next_states = torch.FloatTensor(self.memory.next_states).to(device).detach()
                 
         # Optimize policy for K epochs:
         for epoch in range(self.PPO_epochs):
-            loss, approx_kl = self.get_loss(old_states, old_actions, rewards, old_next_states, dones)          
-            
-            # If KL is bigger than threshold, stop update and continue to next episode
-            if approx_kl > (1.5 * self.target_kl):
-                print('KL greater than target. Stop update at epoch : ', epoch + 1)
-                break
-            
+            loss = self.get_loss(states, actions, rewards, next_states, dones)          
+                        
             self.policy_optimizer.zero_grad()
             loss.backward()                    
             self.policy_optimizer.step() 

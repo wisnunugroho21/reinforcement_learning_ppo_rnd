@@ -18,8 +18,6 @@ class PPO_Model(nn.Module):
                 nn.Linear(state_dim, 64),
                 nn.Tanh(),
                 nn.Linear(64, 64),
-                nn.Tanh(),
-                nn.Linear(64, action_dim),
                 nn.Tanh()
               ).float().to(device)
         
@@ -32,11 +30,11 @@ class PPO_Model(nn.Module):
                 nn.Linear(64, 1)
               ).float().to(device)
 
-    self.mean_layer = nn.Sequential(
-                nn.Linear(64, action_dim))
+        self.mean_layer = nn.Sequential(
+                    nn.Linear(64, action_dim)).float().to(device)
 
-    self.log_std_layer = nn.Sequential(
-                nn.Linear(64, action_dim))
+        self.log_std_layer = nn.Sequential(
+                    nn.Linear(64, action_dim)).float().to(device)
         
     # Init wieghts to make training faster
     # But don't init weight if you load weight from file
@@ -53,9 +51,9 @@ class PPO_Model(nn.Module):
         
     def forward(self, state, is_act = False, is_value = False):
         if is_act and not is_value: 
-            x = self.policy_layer(state)        
-            mean    = self.mean_linear(x)
-            log_std = self.log_std_linear(x)
+            x = self.actor_layer(state)        
+            mean    = self.mean_layer(x)
+            log_std = self.log_std_layer(x)
             log_std = torch.clamp(log_std, -20, 2) # Making sure log_std is not too far        
             return mean, log_std
 
@@ -63,9 +61,9 @@ class PPO_Model(nn.Module):
             return self.value_layer(state)
 
         else:
-            x = self.policy_layer(state)        
-            mean    = self.mean_linear(x)
-            log_std = self.log_std_linear(x)
+            x = self.actor_layer(state)        
+            mean    = self.mean_layer(x)
+            log_std = self.log_std_layer(x)
             log_std = torch.clamp(log_std, -20, 2) # Making sure log_std is not too far
             return mean, log_std, self.value_layer(state)
 
@@ -167,8 +165,8 @@ class Agent:
         self.memory = Memory()
         self.utils = Utils()        
         
-    def save_eps(self, state, reward, action, done, next_state):
-        self.memory.save_eps(state, reward, action, done, next_state)
+    def save_eps(self, state, reward, action, done, next_state, z):
+        self.memory.save_eps(state, reward, action, done, next_state, z)
 
     # Loss for PPO
     def get_loss(self, states, actions, rewards, next_states, dones, z):  
@@ -218,10 +216,10 @@ class Agent:
         
         if self.is_training_mode:
             # Sample the action
-            action = self.utils.sample(action_mean, action_std)
-            return action.cpu().item() 
+            z = self.utils.sample(action_mean, action_std)
+            return torch.tanh(z).cpu().numpy(), z.cpu().numpy()
         else:
-            return action_mean.cpu().numpy()
+            return action_mean.cpu().numpy(), 0
         
     # Update the PPO part (the actor and value)
     def update_ppo(self):        
@@ -278,8 +276,6 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     utils = Utils()
     ############################################
     state = env.reset()
-    state = utils.prepro(state)
-
     done = False
     total_reward = 0
     t = 0
@@ -287,16 +283,15 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     
     while not done:
         # Running policy_old:            
-        action = int(agent.act(state))
+        action, z = agent.act(state)        
         state_n, reward, done, info = env.step(action)
-        state_n = utils.prepro(state_n)
-        
+
         t += 1                       
         total_reward += reward
         t_updates += 1   
           
         if training_mode:
-            agent.save_eps(state, reward, action, done, state_n) 
+            agent.save_eps(state, reward, action, done, state_n, z) 
             
         state = state_n     
                 

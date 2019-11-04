@@ -17,9 +17,9 @@ class PPO_Model(nn.Module):
         # Actor
         self.actor_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, action_dim),
                 nn.Softmax(-1)
               ).float().to(device)
@@ -27,9 +27,9 @@ class PPO_Model(nn.Module):
         # Intrinsic Critic
         self.value_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, 64),
-                nn.ELU(),
+                nn.ReLU(),
                 nn.Linear(64, 1)
               ).float().to(device)
         
@@ -46,9 +46,11 @@ class PPO_Model(nn.Module):
             elif 'weight' in name:
                 nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'relu')
         
-    def forward(self, state, is_act = False):
-        if is_act: 
+    def forward(self, state, is_act = False, is_value = False):
+        if is_act and not is_value: 
             return self.actor_layer(state)
+        elif is_value and not is_act: 
+            return self.value_layer(state)
         else:
             return self.actor_layer(state), self.value_layer(state)
 
@@ -152,14 +154,11 @@ class Agent:
     def save_eps(self, state, reward, action, done, next_state):
         self.memory.save_eps(state, reward, action, done, next_state)
         
-    def save_observation(self, obs):
-        self.memory.save_observation(obs)
-
     # Loss for PPO
     def get_loss(self, states, actions, rewards, next_states, dones):      
         action_probs, values  = self.policy(states)  
         old_action_probs, old_values = self.policy_old(states)
-        _, next_values  = self.policy(next_states)
+        next_values  = self.policy(next_states, is_value = True)
         
         # Don't update old value
         old_values = old_values.detach()

@@ -149,14 +149,13 @@ class Agent:
         self.memory = Memory()
         self.utils = Utils()     
         self.action_var = torch.full((action_dim,), action_std * action_std).to(device)   
+        self.cov_mat = torch.diag_embed(self.action_var).to(device).detach()
         
     def save_eps(self, state, reward, action, done, next_state):
         self.memory.save_eps(state, reward, action, done, next_state)
 
     # Loss for PPO
-    def get_loss(self, states, actions, rewards, next_states, dones):      
-        cov_mat = torch.diag_embed(self.action_var).to(device).detach()
-
+    def get_loss(self, states, actions, rewards, next_states, dones):  
         action_mean, values  = self.policy(states)  
         old_action_mean, old_values = self.policy_old(states)
         next_values  = self.policy(next_states, is_value = True)
@@ -165,7 +164,7 @@ class Agent:
         old_values = old_values.detach()
                 
         # Getting entropy from the action probability
-        dist_entropy = self.utils.entropy(action_mean, cov_mat).mean()
+        dist_entropy = self.utils.entropy(action_mean, self.cov_mat).mean()
 
         # Getting external general advantages estimator
         advantages = self.utils.generalized_advantage_estimation(values, rewards, next_values, dones).detach()
@@ -178,8 +177,8 @@ class Agent:
         critic_loss = torch.max(vf_losses1, vf_losses2).mean() * 0.5
 
         # Finding the ratio (pi_theta / pi_theta__old):  
-        logprobs = self.utils.logprob(action_mean, cov_mat, actions) 
-        old_logprobs = self.utils.logprob(old_action_mean, cov_mat, actions).detach()
+        logprobs = self.utils.logprob(action_mean, self.cov_mat, actions) 
+        old_logprobs = self.utils.logprob(old_action_mean, self.cov_mat, actions).detach()
         
         # Finding Surrogate Loss:
         ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs

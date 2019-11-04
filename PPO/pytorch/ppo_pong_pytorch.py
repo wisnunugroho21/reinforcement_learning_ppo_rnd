@@ -16,21 +16,21 @@ class PPO_Model(nn.Module):
         
         # Actor
         self.actor_layer = nn.Sequential(
-                nn.Linear(state_dim, 200),
+                nn.Linear(state_dim, 64),
                 nn.ReLU(),
-                nn.Linear(200, 200),
+                nn.Linear(64, 64),
                 nn.ReLU(),
-                nn.Linear(200, action_dim),
+                nn.Linear(64, action_dim),
                 nn.Softmax(-1)
               ).float().to(device)
         
         # Intrinsic Critic
         self.value_layer = nn.Sequential(
-                nn.Linear(state_dim, 200),
+                nn.Linear(state_dim, 64),
                 nn.ReLU(),
-                nn.Linear(200, 200),
+                nn.Linear(64, 64),
                 nn.ReLU(),
-                nn.Linear(200, 1)
+                nn.Linear(64, 1)
               ).float().to(device)
         
     # Init wieghts to make training faster
@@ -46,9 +46,11 @@ class PPO_Model(nn.Module):
             elif 'weight' in name:
                 nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'relu')
         
-    def forward(self, state, is_act = False):
-        if is_act: 
+    def forward(self, state, is_act = False, is_value = False):
+        if is_act and not is_value: 
             return self.actor_layer(state)
+        elif is_value and not is_act: 
+            return self.value_layer(state)
         else:
             return self.actor_layer(state), self.value_layer(state)
 
@@ -115,14 +117,14 @@ class Utils:
             returns.insert(0, running_add)
             
         return torch.stack(returns)
-      
+
     def temporal_difference(self, rewards, next_values, dones):
         # Computing temporal difference
         TD = rewards + self.gamma * next_values * (1 - dones)        
         return TD
       
     def generalized_advantage_estimation(self, values, rewards, next_value, done):
-        # Computing generalized advantages estimation
+        # Computing general advantages estimator
         gae = 0
         returns = []
         
@@ -154,19 +156,19 @@ class Agent:
         
         self.policy = PPO_Model(state_dim, action_dim)
         self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 2.5e-4)
+        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 0.001)
 
         self.memory = Memory()
         self.utils = Utils()        
         
     def save_eps(self, state, reward, action, done, next_state):
         self.memory.save_eps(state, reward, action, done, next_state)
-
+        
     # Loss for PPO
     def get_loss(self, states, actions, rewards, next_states, dones):      
         action_probs, values  = self.policy(states)  
         old_action_probs, old_values = self.policy_old(states)
-        _, next_values  = self.policy(next_states)
+        next_values  = self.policy(next_states, is_value = True)
         
         # Don't update old value
         old_values = old_values.detach()
@@ -236,16 +238,16 @@ class Agent:
         self.policy_old.load_state_dict(self.policy.state_dict())
         
     def save_weights(self):
-        torch.save(self.policy.state_dict(), 'actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), 'old_actor_pong_ppo_rnd.pth')
+        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
+        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('old_actor_pong_ppo_rnd.pth'))   
+        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
+        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth')) 
         
     def lets_init_weights(self):
         self.policy.lets_init_weights()
-        self.policy_old.lets_init_weights()
+        self.policy_old.lets_init_weights()     
         
 def plot(datas):
     print('----------')
