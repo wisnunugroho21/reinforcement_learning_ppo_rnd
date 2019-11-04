@@ -96,6 +96,13 @@ class Utils:
     def __init__(self):
         self.gamma = 0.95
         self.lam = 0.99
+
+    # If you want to create Agent for Continous Action Environment, you must find the proper Distribution for it (Some people use Multivariate Gaussian Distribution)
+    # and making the neural network output directly the action, not probability (Deterministic policy).
+
+    # std is not static number, but a number outputed by Policy Neural Network. 
+
+    # This link may will help you : https://www.reddit.com/r/learnmachinelearning/comments/8gp7ze/rl_in_continuous_action_space_how_to_predict_the/
     
     def sample(self, mean, std):
         distribution = Normal(mean, std)      
