@@ -1,10 +1,10 @@
 # PPO-RND
 
-Simple code to demonstrate Reinforcement Learning using Proximal Policy Optimization and Random Network Distillation using Tensorflow 2 and Pytorch
+Simple code to demonstrate Deep Reinforcement Learning by using Proximal Policy Optimization and Random Network Distillation in Tensorflow 2 and Pytorch
 
 ## Getting Started
 
-This project is using Pytorch for Deep Learning Framework and Gym for Reinforcement Learning Environment.  
+This project is using Pytorch and Tensorflow 2 for Deep Learning Framework and using Gym for Reinforcement Learning Environment.  
 Although it's not required, but i recommend run this project on a PC with GPU and 8 GB Ram
 
 ### Prerequisites
@@ -83,7 +83,7 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 | ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/pendulum.gif)  | ![Award Progress Graph](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/ppo_pendulum_tf2.png)  |
 
 ## Future Development
-For now, I focus on how to implement this project on more difficult environment (Atari games, Roboschool, etc)
+For now, I focus on how to implement this project on more difficult environment (Atari games, MuJoCo, etc)
 
 ## Contributing
 This project is far from finish and will be improved anytime . Any fix, contribute, or idea would be very appreciated
