@@ -259,10 +259,8 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
         next_state, reward, done, info = env.step(action)
         
         eps_time += 1 
-        t_updates += 1
-        
+        t_updates += 1        
         total_reward += reward
-        reward = -100 if eps_time < 200 and done else 1
           
         if training_mode:
             agent.save_eps(state, reward, action, done, next_state) 

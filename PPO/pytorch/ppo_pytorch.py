@@ -266,8 +266,6 @@ def run_episode(env, agent, state_dim, render, training_mode):
     utils = Utils()
     ############################################
     state = env.reset()
-    state = utils.prepro(state)
-
     done = False
     total_reward = 0
     t = 0
@@ -277,7 +275,6 @@ def run_episode(env, agent, state_dim, render, training_mode):
         # Running policy_old:            
         action = int(agent.act(state))
         state_n, reward, done, info = env.step(action)
-        state_n = utils.prepro(state_n)
         
         t += 1                       
         total_reward += reward    
