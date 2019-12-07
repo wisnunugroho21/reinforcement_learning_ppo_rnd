@@ -306,14 +306,14 @@ def main():
     load_weights = False # If you want to load the agent, set this to True
     save_weights = False # If you want to save the agent, set this to True
     training_mode = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
-    reward_threshold = 500 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
+    reward_threshold = 200 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
 
     render = False # If you want to display the image. Turn this off if you run this in Google Collab
     n_update = 2048 # How many episode before you update the Policy
     n_plot_batch = 100 # How many episode you want to plot the result
     n_episode = 10000 # How many episode you want to run
     ############################################# 
-    env_name = 'Env Name'
+    env_name = 'LunarLanderContinuous-v2'
     env = gym.make(env_name)
 
     state_dim = env.observation_space.shape[0]

@@ -35,7 +35,7 @@ class Critic_Model(Model):
 
         self.d1 = Dense(64, activation='relu', name = 'c1')
         self.d2 = Dense(64, activation='relu', name = 'c2')
-        self.out = Dense(1, activation='linear', name = 'c3')
+        self.out = Dense(1, activation='linear', name = 'c4')
 
     def call(self, states):
         x = self.d1(states)
@@ -44,41 +44,37 @@ class Critic_Model(Model):
 
 class Memory:
     def __init__(self):
-        self.actions = []
+        self.z = [] # Z is action before squashed by tanh
         self.states = []
         self.rewards = []
         self.dones = []     
-        self.next_states = []
-        self.z = [] # Z is action before squashed by tanh
+        self.next_states = []        
 
-    def save_eps(self, state, reward, action, done, next_state, z):
+    def save_eps(self, state, reward, z, done, next_state):
         self.rewards.append(reward)
         self.states.append(state.tolist())
-        self.actions.append(action)
-        self.dones.append(float(done))
-        self.next_states.append(next_state.tolist())
         self.z.append(z)
+        self.dones.append(float(done))
+        self.next_states.append(next_state.tolist())        
 
     def clearMemory(self):
-        del self.actions[:]
+        del self.z[:]
         del self.states[:]
         del self.rewards[:]
         del self.dones[:]
-        del self.next_states[:]
-        del self.z[:]
+        del self.next_states[:]        
 
     def length(self):
-        return len(self.actions)
+        return len(self.dones)
 
     def get_all_items(self):         
         states = tf.constant(self.states, dtype = tf.float32)
-        actions = tf.constant(self.actions, dtype = tf.float32)
+        z = tf.constant(self.z, dtype = tf.float32) # Z is action before squashed by tanh
         rewards = tf.expand_dims(tf.constant(self.rewards, dtype = tf.float32), 1)
         dones = tf.expand_dims(tf.constant(self.dones, dtype = tf.float32), 1)
-        next_states = tf.constant(self.next_states, dtype = tf.float32)
-        z = tf.constant(self.z, dtype = tf.float32) # Z is action before squashed by tanh
+        next_states = tf.constant(self.next_states, dtype = tf.float32)        
 
-        return tf.data.Dataset.from_tensor_slices((states, actions, rewards, dones, next_states, z)) 
+        return tf.data.Dataset.from_tensor_slices((states, z, rewards, dones, next_states)) 
 
 class Utils:
     def __init__(self):
@@ -101,9 +97,8 @@ class Utils:
         return distribution.entropy()
 
     def logprob(self, mean, std, value_data):
-        action = tf.math.tanh(value_data)
         distribution = tfp.distributions.Normal(mean, std)
-        return distribution.log_prob(value_data) - tf.math.log(1 - tf.math.square(action) + 1e-6) # The logprob must be modified because squashing function
+        return distribution.log_prob(value_data) - tf.math.log(1 - tf.math.square(tf.math.tanh(value_data)) + 1e-6) # The logprob must be modified because squashing function
 
     def normalize(self, data):
         data_normalized = (data - tf.math.reduce_mean(data)) / (tf.math.reduce_std(data) + 1e-8)
@@ -142,10 +137,10 @@ class Agent:
     def __init__(self, state_dim, action_dim, is_training_mode):        
         self.policy_clip = 0.2 
         self.value_clip = 0.2    
-        self.entropy_coef = 0
-        self.vf_loss_coef = 0.5
+        self.entropy_coef = 1
+        self.vf_loss_coef = 1
         self.minibatch = 32        
-        self.PPO_epochs = 10
+        self.PPO_epochs = 5
         self.is_training_mode = is_training_mode
 
         self.actor = Actor_Model(state_dim, action_dim)
@@ -158,11 +153,11 @@ class Agent:
         self.memory = Memory()
         self.utils = Utils()        
 
-    def save_eps(self, state, reward, action, done, next_state, z):
-        self.memory.save_eps(state, reward, action, done, next_state, z)
+    def save_eps(self, state, reward, z, done, next_state):
+        self.memory.save_eps(state, reward, z, done, next_state)
 
     # Loss for PPO  
-    def get_loss(self, states, actions, rewards, dones, next_states, z):        
+    def get_loss(self, states, z, rewards, dones, next_states):        
         action_mean, action_logstd = self.actor(states)
         values = self.critic(states)
         old_action_mean, old_action_logstd = self.actor_old(states)
@@ -223,9 +218,9 @@ class Agent:
 
     # Get loss and Do backpropagation
     @tf.function
-    def training_ppo(self, states, actions, rewards, dones, next_states, z):        
+    def training_ppo(self, states, z, rewards, dones, next_states):        
         with tf.GradientTape() as tape:
-            loss = self.get_loss(states, actions, rewards, dones, next_states, z)
+            loss = self.get_loss(states, z, rewards, dones, next_states)
 
         gradients = tape.gradient(loss, self.actor.trainable_variables + self.critic.trainable_variables)        
         self.optimizer.apply_gradients(zip(gradients, self.actor.trainable_variables + self.critic.trainable_variables)) 
@@ -236,8 +231,8 @@ class Agent:
 
         # Optimize policy for K epochs:
         for epoch in range(self.PPO_epochs):       
-            for states, actions, rewards, dones, next_states, z in self.memory.get_all_items().batch(batch_size):
-                self.training_ppo(states, actions, rewards, dones, next_states, z)
+            for states, z, rewards, dones, next_states in self.memory.get_all_items().batch(batch_size):
+                self.training_ppo(states, z, rewards, dones, next_states)
 
         # Clear the memory
         self.memory.clearMemory()
@@ -282,7 +277,6 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
 
     while not done:
         action, z = agent.act(state)
-        action = action.numpy()
         z = z.numpy()         
         next_state, reward, done, info = env.step(action)
 
@@ -291,7 +285,7 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
         total_reward += reward
 
         if training_mode:
-            agent.save_eps(state, reward, action, done, next_state, z) 
+            agent.save_eps(state, reward, z, done, next_state)
 
         state = next_state     
 
@@ -312,7 +306,7 @@ def main():
     load_weights = False # If you want to load the agent, set this to True
     save_weights = False # If you want to save the agent, set this to True
     training_mode = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
-    reward_threshold = 300 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
+    reward_threshold = 200 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
 
     render = False # If you want to display the image. Turn this off if you run this in Google Collab
     n_update = 2048 # How many episode before you update the Policy
@@ -349,7 +343,7 @@ def main():
 
     for i_episode in range(1, n_episode + 1):
         total_reward, time, t_updates = run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update)
-        print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, int(total_reward), time))
+        print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, total_reward, time))
         batch_rewards.append(int(total_reward))
         batch_times.append(time)        
 
