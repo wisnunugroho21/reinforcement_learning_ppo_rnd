@@ -3,7 +3,7 @@ from gym.envs.registration import register
     
 import torch
 import torch.nn as nn
-from torch.distributions import Categorical
+from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
@@ -17,27 +17,17 @@ import numpy
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")  
 dataType = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 
-class Utils():
-    def prepro(self, I):
-        I           = I[35:195] # crop
-        I           = I[::2,::2, 0] # downsample by factor of 2
-        I[I == 144] = 0 # erase background (background type 1)
-        I[I == 109] = 0 # erase background (background type 2)
-        I[I != 0]   = 1 # everything else (paddles, ball) just set to 1
-        X           = I.astype(np.float32).ravel() # Combine items in 1 array 
-        return X
-
 class Actor_Model(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Actor_Model, self).__init__()   
 
         self.nn_layer = nn.Sequential(
-                nn.Linear(state_dim, 640),
+                nn.Linear(state_dim, 256),
                 nn.ReLU(),
-                nn.Linear(640, 640),
+                nn.Linear(256, 64),
                 nn.ReLU(),
-                nn.Linear(640, action_dim),
-                nn.Softmax(-1)
+                nn.Linear(64, action_dim),
+                nn.Tanh()
               ).float().to(device)
         
     def forward(self, states):
@@ -48,11 +38,11 @@ class Critic_Model(nn.Module):
         super(Critic_Model, self).__init__()   
 
         self.nn_layer = nn.Sequential(
-                nn.Linear(state_dim, 640),
+                nn.Linear(state_dim, 256),
                 nn.ReLU(),
-                nn.Linear(640, 640),
+                nn.Linear(256, 64),
                 nn.ReLU(),
-                nn.Linear(640, 1)
+                nn.Linear(64, 1)
               ).float().to(device)
         
     def forward(self, states):
@@ -72,7 +62,7 @@ class Memory(Dataset):
     def __getitem__(self, idx):
         return np.array(self.states[idx], dtype = np.float32), np.array(self.actions[idx], dtype = np.float32), np.array([self.rewards[idx]], dtype = np.float32), np.array([self.dones[idx]], dtype = np.float32), np.array(self.next_states[idx], dtype = np.float32)      
 
-    def save_eps(self, state, action, reward, done, next_state):
+    def save_eps(self, state, reward, action, done, next_state):
         self.rewards.append(reward)
         self.states.append(state)
         self.actions.append(action)
@@ -87,23 +77,23 @@ class Memory(Dataset):
         del self.next_states[:]  
 
 class Distributions():
-    def sample(self, datas):
-        distribution = Categorical(datas)
+    def sample(self, mean, std):
+        distribution    = Normal(mean, std)
         return distribution.sample().float().to(device)
         
-    def entropy(self, datas):
-        distribution = Categorical(datas)    
+    def entropy(self, mean, std):
+        distribution    = Normal(mean, std)    
         return distribution.entropy().float().to(device)
       
-    def logprob(self, datas, value_data):
-        distribution = Categorical(datas)
-        return distribution.log_prob(value_data).unsqueeze(1).float().to(device)
+    def logprob(self, mean, std, value_data):
+        distribution    = Normal(mean, std)
+        return distribution.log_prob(value_data).float().to(device)
 
-    def kl_divergence(self, datas1, datas2):
-        distribution1 = Categorical(datas1)
-        distribution2 = Categorical(datas2)
+    def kl_divergence(self, mean1, std1, mean2, std2):
+        distribution1   = Normal(mean1, std1)
+        distribution2   = Normal(mean2, std2)
 
-        return kl_divergence(distribution1, distribution2).unsqueeze(1).float().to(device)  
+        return kl_divergence(distribution1, distribution2).float().to(device)  
 
 class PolicyFunction():
     def __init__(self, gamma = 0.99, lam = 0.95):
@@ -135,7 +125,7 @@ class PolicyFunction():
             
         return torch.stack(adv)
 
-class Agent():  
+class Agent:  
     def __init__(self, state_dim, action_dim, is_training_mode, policy_kl_range, policy_params, value_clip, entropy_coef, vf_loss_coef,
                  minibatch, PPO_epochs, gamma, lam, learning_rate):        
         self.policy_kl_range    = policy_kl_range 
@@ -146,7 +136,8 @@ class Agent():
         self.minibatch          = minibatch       
         self.PPO_epochs         = PPO_epochs
         self.is_training_mode   = is_training_mode
-        self.action_dim         = action_dim               
+        self.action_dim         = action_dim 
+        self.std                = torch.ones([1, action_dim]).float().to(device)                
 
         self.actor              = Actor_Model(state_dim, action_dim)
         self.actor_old          = Actor_Model(state_dim, action_dim)
@@ -167,14 +158,14 @@ class Agent():
           self.actor.eval()
           self.critic.eval()
 
-    def save_eps(self, state, action, reward, done, next_state):
-        self.memory.save_eps(state, action, reward, done, next_state)
+    def save_eps(self, state, reward, action, done, next_state):
+        self.memory.save_eps(state, reward, action, done, next_state)
 
     # Loss for PPO  
     def get_loss(self, states, actions, rewards, dones, next_states):         
-        action_probs, values            = self.actor(states), self.critic(states)
-        old_action_probs, old_values    = self.actor_old(states), self.critic_old(states)
-        next_values                     = self.critic(next_states)
+        action_mean, values          = self.actor(states), self.critic(states)
+        old_action_mean, old_values  = self.actor_old(states), self.critic_old(states)
+        next_values                  = self.critic(next_states)
 
         # Don't use old value in backpropagation
         Old_values      = old_values.detach()
@@ -185,12 +176,12 @@ class Agent():
         Advantages      = ((Advantages - Advantages.mean()) / (Advantages.std() + 1e-6)).detach()
 
         # Finding the ratio (pi_theta / pi_theta__old):        
-        logprobs        = self.distributions.logprob(action_probs, actions)
-        Old_logprobs    = self.distributions.logprob(old_action_probs, actions).detach()
+        logprobs        = self.distributions.logprob(action_mean, self.std, actions)
+        Old_logprobs    = self.distributions.logprob(old_action_mean, self.std, actions).detach()
         ratios          = (logprobs - Old_logprobs).exp() # ratios = old_logprobs / logprobs
 
         # Finding KL Divergence                
-        Kl              = self.distributions.kl_divergence(old_action_probs, action_probs)
+        Kl              = self.distributions.kl_divergence(old_action_mean, self.std, action_mean, self.std)
 
         # Combining TR-PPO with Rollback (Truly PPO)
         pg_loss         = torch.where(
@@ -201,7 +192,7 @@ class Agent():
         pg_loss         = pg_loss.mean()
 
         # Getting entropy from the action probability 
-        dist_entropy    = self.distributions.entropy(action_probs).mean()
+        dist_entropy    = self.distributions.entropy(action_mean, self.std).mean()
 
         # Getting critic loss by using Clipped critic value
         vpredclipped    = old_values + torch.clamp(values - Old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
@@ -215,22 +206,22 @@ class Agent():
         return loss       
 
     def act(self, state):
-        state           = torch.FloatTensor(state).unsqueeze(0).to(device).detach()
-        action_probs    = self.actor(state)
+        state       = torch.FloatTensor(state).unsqueeze(0).to(device).detach()
+        action_mean = self.actor(state)
         
         # We don't need sample the action in Test Mode
         # only sampling the action in Training Mode in order to exploring the actions
         if self.is_training_mode:
             # Sample the action
-            action  = self.distributions.sample(action_probs) 
+            action  = self.distributions.sample(action_mean, self.std)
         else:
-            action  = torch.argmax(action_probs, 1)  
+            action  = action_mean  
               
-        return action.cpu().item()
+        return action.squeeze(0).cpu().numpy()
 
     # Get loss and Do backpropagation
     def training_ppo(self, states, actions, rewards, dones, next_states):        
-        loss    = self.get_loss(states, actions, rewards, dones, next_states)
+        loss = self.get_loss(states, actions, rewards, dones, next_states)
 
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
@@ -291,26 +282,25 @@ def plot(datas):
     print('Avg :', np.mean(datas))
 
 def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update):
-    utils           = Utils()
     ############################################
-    state           = env.reset()
+    state           = env.reset()    
     done            = False
     total_reward    = 0
     eps_time        = 0
     ############################################
     
     while not done:
-        action                      = int(agent.act(state))
-        next_obs, reward, done, _   = env.step(action)
+        action                      = agent.act(state)
+        next_state, reward, done, _ = env.step(action)
         
         eps_time        += 1 
         t_updates       += 1
         total_reward    += reward
-
+          
         if training_mode:
-            agent.save_eps(state.tolist(), float(action), float(reward), float(done), next_state.tolist()) 
+            agent.save_eps(state.tolist(), reward, action, float(done), next_state.tolist()) 
             
-        state   = next_state
+        state   = next_state 
                 
         if render:
             env.render()
@@ -320,8 +310,8 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
                 agent.update_ppo()
                 t_updates = 0
         
-        if done:           
-            return total_reward, eps_time, t_updates           
+        if done:                      
+            return total_reward, eps_time, t_updates               
 
 def main():
     ############## Hyperparameters ##############
@@ -331,29 +321,29 @@ def main():
     reward_threshold    = 300 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     using_google_drive  = False
 
-    render              = True # If you want to display the image. Turn this off if you run this in Google Collab
-    n_update            = 128 # How many episode before you update the Policy. ocommended set to 128 for Discrete
+    render              = True # If you want to display the image, set this to True. Turn this off if you run this in Google Collab
+    n_update            = 1024 # How many episode before you update the Policy. ocommended set to 128 for Discrete
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
     n_saved             = 10 # How many episode to run before saving the weights
 
-    policy_kl_range     = 0.0008 # Set to 0.0008 for Discrete
-    policy_params       = 20 # Set to 20 for Discrete
+    policy_kl_range     = 0.03 # Set to 0.0008 for Discrete
+    policy_params       = 5 # Set to 20 for Discrete
     value_clip          = 1.0 # How many value will be clipped. Recommended set to the highest or lowest possible reward
-    entropy_coef        = 0.05 # How much randomness of action you will get
+    entropy_coef        = 0.0 # How much randomness of action you will get
     vf_loss_coef        = 1.0 # Just set to 1
-    minibatch           = 4 # How many batch per update. size of batch = n_update / minibatch. Rocommended set to 4 for Discrete
-    PPO_epochs          = 4 # How many epoch per update
+    minibatch           = 32 # How many batch per update. size of batch = n_update / minibatch. Rocommended set to 4 for Discrete
+    PPO_epochs          = 10 # How many epoch per update
     
     gamma               = 0.99 # Just set to 0.99
     lam                 = 0.95 # Just set to 0.95
-    learning_rate       = 2.5e-4 # Just set to 0.95
+    learning_rate       = 3e-4 # Just set to 0.95
     ############################################# 
-    env_name            = 'Env Name' # Set the env you want
+    env_name            = 'Env Name'
     env                 = gym.make(env_name)
 
     state_dim           = env.observation_space.shape[0]
-    action_dim          = env.action_space.n
+    action_dim          = env.action_space.shape[0]
 
     agent               = Agent(state_dim, action_dim, training_mode, policy_kl_range, policy_params, value_clip, entropy_coef, vf_loss_coef,
                             minibatch, PPO_epochs, gamma, lam, learning_rate)  

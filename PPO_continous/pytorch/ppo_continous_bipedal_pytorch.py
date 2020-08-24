@@ -321,19 +321,19 @@ def main():
     reward_threshold    = 300 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     using_google_drive  = False
 
-    render              = True # If you want to display the image. Turn this off if you run this in Google Collab
-    n_update            = 1024 # How many episode before you update the Policy. ocommended set to 128 for Discrete
+    render              = True # If you want to display the image, set this to True. Turn this off if you run this in Google Collab
+    n_update            = 1024 # How many episode before you update the Policy. Recommended set to 1024 for Continous
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
     n_saved             = 10 # How many episode to run before saving the weights
 
-    policy_kl_range     = 0.03 # Set to 0.0008 for Discrete
-    policy_params       = 5 # Set to 20 for Discrete
+    policy_kl_range     = 0.03 # Recommended set to 0.03 for Continous
+    policy_params       = 5 # Recommended set to 5 for Continous
     value_clip          = 1.0 # How many value will be clipped. Recommended set to the highest or lowest possible reward
-    entropy_coef        = 0.0 # How much randomness of action you will get
+    entropy_coef        = 0.0 # How much randomness of action you will get. Because we use Standard Deviation for Continous, no need to use Entropy for randomness
     vf_loss_coef        = 1.0 # Just set to 1
-    minibatch           = 32 # How many batch per update. size of batch = n_update / minibatch. Rocommended set to 4 for Discrete
-    PPO_epochs          = 10 # How many epoch per update
+    minibatch           = 32 # How many batch per update. size of batch = n_update / minibatch. Recommended set to 32 for Continous
+    PPO_epochs          = 10 # How many epoch per update. Recommended set to 10 for Continous
     
     gamma               = 0.99 # Just set to 0.99
     lam                 = 0.95 # Just set to 0.95

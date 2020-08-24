@@ -268,7 +268,7 @@ def plot(datas):
 def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update):
     utils           = Utils()
     ############################################
-    state           = to_categorical(env.reset(), num_classes = state_dim)
+    state           = env.reset()
     done            = False
     total_reward    = 0
     eps_time        = 0
@@ -277,14 +277,13 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     while not done:
         action                          = int(agent.act(state))
         next_state, reward, done, _     = env.step(action)
-        next_state                      = to_categorical(next_state, num_classes = state_dim)
         
         eps_time        += 1 
         t_updates       += 1
         total_reward    += reward
 
         if training_mode:
-            agent.save_eps(state.tolist(), float(action), float(reward), float(done), next_state.tolist()) 
+            agent.save_eps(state.tolist(), action, reward, float(done), next_state.tolist()) 
             
         state   = next_state
                 
@@ -300,16 +299,6 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
             return total_reward, eps_time, t_updates           
 
 def main():
-    try:
-        register(
-            id='FrozenLakeNotSlippery-v0',
-            entry_point='gym.envs.toy_text:FrozenLakeEnv',
-            kwargs={'map_name' : '4x4', 'is_slippery': False},
-            max_episode_steps=100,
-            reward_threshold=0.78, # optimum = .8196
-        )
-    except:
-        pass
     ############## Hyperparameters ##############
     load_weights        = False # If you want to load the agent, set this to True
     save_weights        = False # If you want to save the agent, set this to True
@@ -317,8 +306,8 @@ def main():
     reward_threshold    = 300 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     using_google_drive  = False
 
-    render              = False # If you want to display the image. Turn this off if you run this in Google Collab
-    n_update            = 32 # How many episode before you update the Policy. ocommended set to 128 for Discrete
+    render              = True # If you want to display the image. Turn this off if you run this in Google Collab
+    n_update            = 128 # How many episode before you update the Policy. ocommended set to 128 for Discrete
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
     n_saved             = 10 # How many episode to run before saving the weights
@@ -328,17 +317,17 @@ def main():
     value_clip          = 1.0 # How many value will be clipped. Recommended set to the highest or lowest possible reward
     entropy_coef        = 0.05 # How much randomness of action you will get
     vf_loss_coef        = 1.0 # Just set to 1
-    minibatch           = 2 # How many batch per update. size of batch = n_update / minibatch. Rocommended set to 4 for Discrete
+    minibatch           = 4 # How many batch per update. size of batch = n_update / minibatch. Rocommended set to 4 for Discrete
     PPO_epochs          = 4 # How many epoch per update
     
     gamma               = 0.99 # Just set to 0.99
     lam                 = 0.95 # Just set to 0.95
     learning_rate       = 2.5e-4 # Just set to 0.95
     ############################################# 
-    env_name            = 'FrozenLakeNotSlippery-v0' # Set the env you want
+    env_name            = 'LunarLander-v2' # Set the env you want
     env                 = gym.make(env_name)
 
-    state_dim           = env.observation_space.n
+    state_dim           = env.observation_space.shape[0]
     action_dim          = env.action_space.n
 
     print(action_dim)

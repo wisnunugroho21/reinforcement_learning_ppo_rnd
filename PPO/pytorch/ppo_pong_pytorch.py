@@ -338,7 +338,7 @@ def main():
     using_google_drive  = False
 
     render              = True # If you want to display the image. Turn this off if you run this in Google Collab
-    n_update            = 128 # How many episode before you update the Policy. ocommended set to 128 for Discrete
+    n_update            = 128 # How many episode before you update the Policy. Recommended set to 128 for Discrete
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
     n_saved             = 10 # How many episode to run before saving the weights
@@ -348,8 +348,8 @@ def main():
     value_clip          = 1.0 # How many value will be clipped. Recommended set to the highest or lowest possible reward
     entropy_coef        = 0.05 # How much randomness of action you will get
     vf_loss_coef        = 1.0 # Just set to 1
-    minibatch           = 4 # How many batch per update. size of batch = n_update / minibatch. Rocommended set to 4 for Discrete
-    PPO_epochs          = 4 # How many epoch per update
+    minibatch           = 4 # How many batch per update. size of batch = n_update / minibatch. Recommended set to 4 for Discrete
+    PPO_epochs          = 4 # How many epoch per update. Recommended set to 10 for Discrete
     
     gamma               = 0.99 # Just set to 0.99
     lam                 = 0.95 # Just set to 0.95
