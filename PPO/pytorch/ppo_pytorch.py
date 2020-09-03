@@ -247,7 +247,7 @@ class Agent():
         dataloader  = DataLoader(self.memory, batch_size, shuffle = False)
 
         # Optimize policy for K epochs:
-        for epoch in range(self.PPO_epochs):       
+        for _ in range(self.PPO_epochs):       
             for states, actions, rewards, dones, next_states in dataloader:
                 self.training_ppo(states.float().to(device), actions.float().to(device), rewards.float().to(device), dones.float().to(device), next_states.float().to(device))
 
@@ -292,7 +292,6 @@ def plot(datas):
     print('Avg :', np.mean(datas))
 
 def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update):
-    utils           = Utils()
     ############################################
     state           = env.reset()
     done            = False
