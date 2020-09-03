@@ -1,3 +1,6 @@
+## Version 2
+Version 2 is not yet ready. You can use pytorch version of PPO & PPO_continous, but the rest is not yet finished. Still working to port PPO & PPO_continous from pytorch to tensorflow 2
+
 # PPO-RND
 
 Simple code to demonstrate Deep Reinforcement Learning by using Proximal Policy Optimization and Random Network Distillation in Tensorflow 2 and Pytorch
