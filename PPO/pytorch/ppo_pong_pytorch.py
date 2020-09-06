@@ -171,11 +171,7 @@ class Agent():
         self.memory.save_eps(state, action, reward, done, next_state)
 
     # Loss for PPO  
-    def get_loss(self, states, actions, rewards, dones, next_states):         
-        action_probs, values            = self.actor(states), self.critic(states)
-        old_action_probs, old_values    = self.actor_old(states), self.critic_old(states)
-        next_values                     = self.critic(next_states)
-
+    def get_loss(self, action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones):
         # Don't use old value in backpropagation
         Old_values      = old_values.detach()
 
@@ -194,7 +190,7 @@ class Agent():
 
         # Combining TR-PPO with Rollback (Truly PPO)
         pg_loss         = torch.where(
-                (Kl >= self.policy_kl_range) & (ratios * Advantages >= 1 * Advantages),
+                (Kl >= self.policy_kl_range) & (ratios >= 1),
                 ratios * Advantages - self.policy_params * Kl,
                 ratios * Advantages - self.policy_kl_range
         ) 
@@ -229,8 +225,12 @@ class Agent():
         return action.cpu().item()
 
     # Get loss and Do backpropagation
-    def training_ppo(self, states, actions, rewards, dones, next_states):        
-        loss    = self.get_loss(states, actions, rewards, dones, next_states)
+    def training_ppo(self, states, actions, rewards, dones, next_states):
+        action_probs, values            = self.actor(states), self.critic(states)
+        old_action_probs, old_values    = self.actor_old(states), self.critic_old(states)
+        next_values                     = self.critic(next_states)
+
+        loss    = self.get_loss(action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones)
 
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
@@ -291,9 +291,10 @@ def plot(datas):
     print('Avg :', np.mean(datas))
 
 def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update):
+    utils           = Utils()
     ############################################
     obs             = env.reset()
-    obs             = utils.prepo(obs)
+    obs             = utils.prepro(obs)
     state           = obs
 
     done            = False
@@ -303,8 +304,10 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     
     while not done:
         action                      = int(agent.act(state))
-        next_obs, reward, done, _   = env.step(action)
-        next_obs                    = utils.prepo(next_obs)
+        action_gym                  = action + 1 if action != 0 else 0
+
+        next_obs, reward, done, _   = env.step(action_gym)
+        next_obs                    = utils.prepro(next_obs)
         next_state                  = next_obs - obs
         
         eps_time        += 1 
@@ -336,7 +339,7 @@ def main():
     reward_threshold    = 300 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     using_google_drive  = False
 
-    render              = True # If you want to display the image. Turn this off if you run this in Google Collab
+    render              = False # If you want to display the image. Turn this off if you run this in Google Collab
     n_update            = 128 # How many episode before you update the Policy. Recommended set to 128 for Discrete
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
@@ -378,7 +381,6 @@ def main():
     times               = []
     batch_times         = []
 
-    total_time          = 0
     t_updates           = 0
 
     for i_episode in range(1, n_episode + 1):

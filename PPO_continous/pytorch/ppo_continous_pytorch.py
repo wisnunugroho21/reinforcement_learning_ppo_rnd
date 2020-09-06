@@ -162,11 +162,7 @@ class Agent:
         self.memory.save_eps(state, reward, action, done, next_state)
 
     # Loss for PPO  
-    def get_loss(self, states, actions, rewards, dones, next_states):         
-        action_mean, values          = self.actor(states), self.critic(states)
-        old_action_mean, old_values  = self.actor_old(states), self.critic_old(states)
-        next_values                  = self.critic(next_states)
-
+    def get_loss(self, action_mean, values, old_action_mean, old_values, next_values, actions, rewards, dones):
         # Don't use old value in backpropagation
         Old_values      = old_values.detach()
 
@@ -220,8 +216,12 @@ class Agent:
         return action.squeeze(0).cpu().numpy()
 
     # Get loss and Do backpropagation
-    def training_ppo(self, states, actions, rewards, dones, next_states):        
-        loss = self.get_loss(states, actions, rewards, dones, next_states)
+    def training_ppo(self, states, actions, rewards, dones, next_states):                 
+        action_mean, values          = self.actor(states), self.critic(states)
+        old_action_mean, old_values  = self.actor_old(states), self.critic_old(states)
+        next_values                  = self.critic(next_states)
+
+        loss = self.get_loss(action_mean, values, old_action_mean, old_values, next_values, actions, rewards, dones)
 
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
@@ -321,7 +321,7 @@ def main():
     reward_threshold    = 300 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     using_google_drive  = False
 
-    render              = True # If you want to display the image, set this to True. Turn this off if you run this in Google Collab
+    render              = False # If you want to display the image, set this to True. Turn this off if you run this in Google Collab
     n_update            = 1024 # How many episode before you update the Policy. ocommended set to 128 for Discrete
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
@@ -363,7 +363,6 @@ def main():
     times               = []
     batch_times         = []
 
-    total_time          = 0
     t_updates           = 0
 
     for i_episode in range(1, n_episode + 1):

@@ -172,11 +172,7 @@ class Agent():
         self.memory.save_eps(state, action, reward, done, next_state)
 
     # Loss for PPO  
-    def get_loss(self, states, actions, rewards, dones, next_states):         
-        action_probs, values            = self.actor(states), self.critic(states)
-        old_action_probs, old_values    = self.actor_old(states), self.critic_old(states)
-        next_values                     = self.critic(next_states)
-
+    def get_loss(self, action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones):
         # Don't use old value in backpropagation
         Old_values      = old_values.detach()
 
@@ -230,8 +226,12 @@ class Agent():
         return action.cpu().item()
 
     # Get loss and Do backpropagation
-    def training_ppo(self, states, actions, rewards, dones, next_states):        
-        loss    = self.get_loss(states, actions, rewards, dones, next_states)
+    def training_ppo(self, states, actions, rewards, dones, next_states):
+        action_probs, values            = self.actor(states), self.critic(states)
+        old_action_probs, old_values    = self.actor_old(states), self.critic_old(states)
+        next_values                     = self.critic(next_states)
+
+        loss    = self.get_loss(action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones)
 
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
@@ -373,7 +373,6 @@ def main():
     times               = []
     batch_times         = []
 
-    total_time          = 0
     t_updates           = 0
 
     for i_episode in range(1, n_episode + 1):

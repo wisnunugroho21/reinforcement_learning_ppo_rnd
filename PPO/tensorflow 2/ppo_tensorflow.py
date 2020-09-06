@@ -39,7 +39,7 @@ class Critic_Model(Model):
     super(Critic_Model, self).__init__()
     self.d1     = Dense(32, activation='relu')
     self.d2     = Dense(32, activation='relu')
-    self.dout   = Dense(1, activation='softmax')
+    self.dout   = Dense(1, activation='linear')
 
   def call(self, x):
     x = self.d1(x)
@@ -157,11 +157,7 @@ class Agent():
         self.memory.save_eps(state, action, reward, done, next_state)
 
     # Loss for PPO  
-    def get_loss(self, states, actions, rewards, dones, next_states):         
-        action_probs, values            = self.actor(states), self.critic(states)
-        old_action_probs, old_values    = self.actor_old(states), self.critic_old(states)
-        next_values                     = self.critic(next_states)
-
+    def get_loss(self, action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones):   
         # Don't use old value in backpropagation
         Old_values      = tf.stop_gradient(old_values)
 
@@ -219,7 +215,11 @@ class Agent():
     @tf.function
     def training_ppo(self, states, actions, rewards, dones, next_states):        
         with tf.GradientTape() as tape:
-            loss = self.get_loss(states, actions, rewards, dones, next_states)
+            action_probs, values            = self.actor(states), self.critic(states)
+            old_action_probs, old_values    = self.actor_old(states), self.critic_old(states)
+            next_values                     = self.critic(next_states)
+
+            loss = self.get_loss(action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones)
 
         gradients = tape.gradient(loss, self.actor.trainable_variables + self.critic.trainable_variables)        
         self.optimizer.apply_gradients(zip(gradients, self.actor.trainable_variables + self.critic.trainable_variables)) 
@@ -229,7 +229,7 @@ class Agent():
         batch_size = int(len(self.memory) / self.minibatch)
 
         # Optimize policy for K epochs:
-        for epoch in range(self.PPO_epochs):       
+        for _ in range(self.PPO_epochs):       
             for states, actions, rewards, dones, next_states in self.memory.get_all_items().batch(batch_size):
                 self.training_ppo(states, actions, rewards, dones, next_states)
 
@@ -266,7 +266,6 @@ def plot(datas):
     print('Avg :', np.mean(datas))
 
 def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update):
-    utils           = Utils()
     ############################################
     state           = env.reset()
     done            = False
@@ -306,8 +305,8 @@ def main():
     reward_threshold    = 300 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     using_google_drive  = False
 
-    render              = True # If you want to display the image. Turn this off if you run this in Google Collab
-    n_update            = 128 # How many episode before you update the Policy. ocommended set to 128 for Discrete
+    render              = False # If you want to display the image. Turn this off if you run this in Google Collab
+    n_update            = 32 # How many episode before you update the Policy. ocommended set to 128 for Discrete
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
     n_saved             = 10 # How many episode to run before saving the weights
@@ -317,14 +316,14 @@ def main():
     value_clip          = 1.0 # How many value will be clipped. Recommended set to the highest or lowest possible reward
     entropy_coef        = 0.05 # How much randomness of action you will get
     vf_loss_coef        = 1.0 # Just set to 1
-    minibatch           = 4 # How many batch per update. size of batch = n_update / minibatch. Rocommended set to 4 for Discrete
+    minibatch           = 2 # How many batch per update. size of batch = n_update / minibatch. Rocommended set to 4 for Discrete
     PPO_epochs          = 4 # How many epoch per update
     
     gamma               = 0.99 # Just set to 0.99
     lam                 = 0.95 # Just set to 0.95
     learning_rate       = 2.5e-4 # Just set to 0.95
     ############################################# 
-    env_name            = 'LunarLander-v2' # Set the env you want
+    env_name            = 'Env Name' # Set the env you want
     env                 = gym.make(env_name)
 
     state_dim           = env.observation_space.shape[0]
@@ -350,7 +349,6 @@ def main():
     times               = []
     batch_times         = []
 
-    total_time          = 0
     t_updates           = 0
 
     for i_episode in range(1, n_episode + 1):
