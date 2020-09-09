@@ -41,7 +41,7 @@ class Utils():
             data_normalized = (data - torch.mean(data)) / (torch.std(data) + 1e-8)
                     
         if clip:
-            data_normalized = torch.clamp(data_normalized, -clip, clip)
+            data_normalized = torch.clamp(data_normalized, -1 * clip, clip)
 
         return data_normalized
 
@@ -76,9 +76,9 @@ class Critic_Model(nn.Module):
     def forward(self, states):
         return self.nn_layer(states)
 
-class RND_predictor_Model(nn.Module):
+class RND_Model(nn.Module):
     def __init__(self, state_dim, action_dim):
-        super(RND_predictor_Model, self).__init__()   
+        super(RND_Model, self).__init__()   
 
         self.nn_layer = nn.Sequential(
                 nn.Linear(state_dim, 64),
@@ -91,20 +91,36 @@ class RND_predictor_Model(nn.Module):
     def forward(self, states):
         return self.nn_layer(states)
 
-class RND_target_Model(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(RND_target_Model, self).__init__()   
+class ObsMemory(Dataset):
+    def __init__(self, state_dim):
+        self.observations    = []
 
-        self.nn_layer = nn.Sequential(
-                nn.Linear(state_dim, 64),
-                nn.ReLU(),
-                nn.Linear(64, 64),
-                nn.ReLU(),
-                nn.Linear(64, 1)
-              ).float().to(device)
+        self.mean_obs           = torch.zeros(state_dim).to(device)
+        self.std_obs            = torch.zeros(state_dim).to(device)
+        self.std_in_rewards     = torch.FloatTensor([0]).to(device)
+        self.total_number_obs   = torch.FloatTensor([0]).to(device)
+        self.total_number_rwd   = torch.FloatTensor([0]).to(device)
+
+    def __len__(self):
+        return len(self.observations)
+
+    def __getitem__(self, idx):
+        return np.array(self.observations[idx], dtype = np.float32)
+
+    def save_eps(self, obs):
+        self.observations.append(obs)
+
+    def save_observation_normalize_parameter(self, mean_obs, std_obs, total_number_obs):
+        self.mean_obs           = mean_obs
+        self.std_obs            = std_obs
+        self.total_number_obs   = total_number_obs
         
-    def forward(self, states):
-        return self.nn_layer(states)
+    def save_rewards_normalize_parameter(self, std_in_rewards, total_number_rwd):
+        self.std_in_rewards     = std_in_rewards
+        self.total_number_rwd   = total_number_rwd
+
+    def clearMemory(self):
+        del self.observations[:]
 
 class Memory(Dataset):
     def __init__(self, state_dim):
@@ -113,13 +129,6 @@ class Memory(Dataset):
         self.rewards        = []
         self.dones          = []     
         self.next_states    = []
-        self.observation    = []
-
-        self.mean_obs           = torch.zeros(state_dim).to(device)
-        self.std_obs            = torch.zeros(state_dim).to(device)
-        self.std_in_rewards     = torch.FloatTensor([0]).to(device)
-        self.total_number_obs   = torch.FloatTensor([0]).to(device)
-        self.total_number_rwd   = torch.FloatTensor([0]).to(device)
 
     def __len__(self):
         return len(self.dones)
@@ -132,29 +141,14 @@ class Memory(Dataset):
         self.states.append(state)
         self.actions.append(action)
         self.dones.append(done)
-        self.next_states.append(next_state)
-
-    def save_observation(self, obs):
-        self.observation.append(obs)
-
-    def save_observation_normalize_parameter(self, mean_obs, std_obs, total_number_obs):
-        self.mean_obs           = mean_obs
-        self.std_obs            = std_obs
-        self.total_number_obs   = total_number_obs
-        
-    def save_rewards_normalize_parameter(self, std_in_rewards, total_number_rwd):
-        self.std_in_rewards     = std_in_rewards
-        self.total_number_rwd   = total_number_rwd        
+        self.next_states.append(next_state)       
 
     def clearMemory(self):
         del self.actions[:]
         del self.states[:]
         del self.rewards[:]
         del self.dones[:]
-        del self.next_states[:]  
-
-    def clearObs(self):
-        del self.observation[:]
+        del self.next_states[:]
 
 class Distributions():
     def sample(self, datas):
@@ -215,6 +209,7 @@ class Agent():
         self.vf_loss_coef           = vf_loss_coef
         self.minibatch              = minibatch       
         self.PPO_epochs             = PPO_epochs
+        self.RND_epochs             = 5
         self.is_training_mode       = is_training_mode
         self.action_dim             = action_dim               
 
@@ -222,44 +217,56 @@ class Agent():
         self.actor_old              = Actor_Model(state_dim, action_dim)
         self.actor_optimizer        = Adam(self.actor.parameters(), lr = learning_rate)
 
-        self.critic                 = Critic_Model(state_dim, action_dim)
-        self.critic_old             = Critic_Model(state_dim, action_dim)
-        self.critic_optimizer       = Adam(self.critic.parameters(), lr = learning_rate)
+        self.ex_critic              = Critic_Model(state_dim, action_dim)
+        self.ex_critic_old          = Critic_Model(state_dim, action_dim)
+        self.ex_critic_optimizer    = Adam(self.ex_critic.parameters(), lr = learning_rate)
 
-        self.rnd_predict            = RND_predictor_Model(state_dim, action_dim)
+        self.in_critic              = Critic_Model(state_dim, action_dim)
+        self.in_critic_old          = Critic_Model(state_dim, action_dim)
+        self.in_critic_optimizer    = Adam(self.in_critic.parameters(), lr = learning_rate)
+
+        self.rnd_predict            = RND_Model(state_dim, action_dim)
         self.rnd_predict_optimizer  = Adam(self.rnd_predict.parameters(), lr = learning_rate)
-        self.rnd_target             = RND_target_Model(state_dim, action_dim)
+        self.rnd_target             = RND_Model(state_dim, action_dim)
 
         self.memory                 = Memory(state_dim)
+        self.obs_memory             = ObsMemory(state_dim)
+
         self.policy_function        = PolicyFunction(gamma, lam)  
         self.distributions          = Distributions()
         self.utils                  = Utils()
 
+        self.ex_advantages_coef     = 2
+        self.in_advantages_coef     = 1        
+        self.clip_normalization     = 5
+
         if is_training_mode:
           self.actor.train()
-          self.critic.train()
+          self.ex_critic.train()
+          self.in_critic.train()
         else:
           self.actor.eval()
-          self.critic.eval()
+          self.ex_critic.eval()
+          self.in_critic.eval()
 
     def save_eps(self, state, action, reward, done, next_state):
         self.memory.save_eps(state, action, reward, done, next_state)
 
     def save_observation(self, obs):
-        self.memory.save_observation(obs)
+        self.obs_memory.save_eps(obs)
 
     def updateObsNormalizationParam(self, obs):
-        mean_obs            = self.utils.countNewMean(self.memory.mean_obs, self.memory.total_number_obs, obs)
-        std_obs             = self.utils.countNewStd(self.memory.std_obs, self.memory.total_number_obs, obs)
-        total_number_obs    = len(obs) + self.memory.total_number_obs
+        mean_obs            = self.utils.countNewMean(self.obs_memory.mean_obs, self.obs_memory.total_number_obs, obs)
+        std_obs             = self.utils.countNewStd(self.obs_memory.std_obs, self.obs_memory.total_number_obs, obs)
+        total_number_obs    = len(obs) + self.obs_memory.total_number_obs
         
-        self.memory.save_observation_normalize_parameter(mean_obs, std_obs, total_number_obs)
+        self.obs_memory.save_observation_normalize_parameter(mean_obs, std_obs, total_number_obs)
     
     def updateRwdNormalizationParam(self, in_rewards):
-        std_in_rewards      = self.utils.countNewStd(self.memory.std_in_rewards, self.memory.total_number_rwd, in_rewards)
-        total_number_rwd    = len(in_rewards) + self.memory.total_number_rwd
+        std_in_rewards      = self.utils.countNewStd(self.obs_memory.std_in_rewards, self.obs_memory.total_number_rwd, in_rewards)
+        total_number_rwd    = len(in_rewards) + self.obs_memory.total_number_rwd
         
-        self.memory.save_rewards_normalize_parameter(std_in_rewards, total_number_rwd)
+        self.obs_memory.save_rewards_normalize_parameter(std_in_rewards, total_number_rwd)
 
     # Loss for RND 
     def get_rnd_loss(self, state_pred, state_target):        
@@ -271,14 +278,25 @@ class Agent():
         return forward_loss
 
     # Loss for PPO  
-    def get_PPO_loss(self, action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones):
-        # Don't use old value in backpropagation
-        Old_values      = old_values.detach()
+    def get_PPO_loss(self, action_probs, ex_values, old_action_probs, old_ex_values, next_ex_values, actions, ex_rewards, dones, 
+        state_preds, state_targets, in_values, old_in_values, next_in_values, std_in_rewards):
 
-        # Getting general advantages estimator
-        Advantages      = self.policy_function.generalized_advantage_estimation(values, rewards, next_values, dones)
-        Returns         = (Advantages + values).detach()
-        Advantages      = ((Advantages - Advantages.mean()) / (Advantages.std() + 1e-6)).detach()
+        # Don't use old value in backpropagation
+        Old_ex_values           = old_ex_values.detach()
+
+        # Getting external general advantages estimator
+        External_Advantages     = self.policy_function.generalized_advantage_estimation(ex_values, ex_rewards, next_ex_values, dones)
+        External_Returns        = (External_Advantages + ex_values).detach()
+        External_Advantages     = ((External_Advantages - External_Advantages.mean()) / (External_Advantages.std() + 1e-6)).detach()
+
+        # Computing internal reward, then getting internal general advantages estimator
+        in_rewards              = (state_targets - state_preds).pow(2) / (std_in_rewards + 1e-8)
+        Internal_Advantages     = self.policy_function.generalized_advantage_estimation(in_values, in_rewards, next_in_values, dones)
+        Internal_Returns        = (Internal_Advantages + in_values).detach()
+        Internal_Advantages     = ((Internal_Advantages - Internal_Advantages.mean()) / (Internal_Advantages.std() + 1e-6)).detach()
+
+        # Getting overall advantages
+        Advantages              = (self.ex_advantages_coef * External_Advantages + self.in_advantages_coef * Internal_Advantages).detach()
 
         # Finding the ratio (pi_theta / pi_theta__old):        
         logprobs        = self.distributions.logprob(action_probs, actions)
@@ -300,10 +318,16 @@ class Agent():
         dist_entropy    = self.distributions.entropy(action_probs).mean()
 
         # Getting critic loss by using Clipped critic value
-        vpredclipped    = old_values + torch.clamp(values - Old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
-        vf_losses1      = (Returns - values).pow(2) * 0.5 # Mean Squared Error
-        vf_losses2      = (Returns - vpredclipped).pow(2) * 0.5 # Mean Squared Error        
-        critic_loss     = torch.max(vf_losses1, vf_losses2).mean()                
+        ex_vpredclipped = Old_ex_values + torch.clamp(ex_values - Old_ex_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
+        ex_vf_losses1   = (External_Returns - ex_values).pow(2) # Mean Squared Error
+        ex_vf_losses2   = (External_Returns - ex_vpredclipped).pow(2) # Mean Squared Error
+        critic_ext_loss = torch.max(ex_vf_losses1, ex_vf_losses2).mean()      
+
+        # Getting Intrinsic critic loss
+        critic_int_loss = (Internal_Returns - in_values).pow(2).mean()
+
+        # Getting overall critic loss
+        critic_loss     = (critic_ext_loss + critic_int_loss) * 0.5    
 
         # We need to maximaze Policy Loss to make agent always find Better Rewards
         # and minimize Critic Loss 
@@ -325,20 +349,60 @@ class Agent():
         return action.cpu().item()
 
     # Get loss and Do backpropagation
-    def training_ppo(self, states, actions, rewards, dones, next_states):
-        action_probs, values            = self.actor(states), self.critic(states)
-        old_action_probs, old_values    = self.actor_old(states), self.critic_old(states)
-        next_values                     = self.critic(next_states)
+    def training_rnd(self, obs, mean_obs, std_obs):
+        obs             = self.utils.normalize(obs, mean_obs, std_obs)
+        
+        state_pred      = self.rnd_predict(obs)
+        state_target    = self.rnd_target(obs)
 
-        loss    = self.get_PPO_loss(action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones)
+        loss            = self.get_rnd_loss(state_pred, state_target)
+
+        self.rnd_predict_optimizer.zero_grad()
+        loss.backward()
+        self.rnd_predict_optimizer.step()
+
+        return (state_target - state_pred)
+
+    # Get loss and Do backpropagation
+    def training_ppo(self, states, actions, rewards, dones, next_states, mean_obs, std_obs, std_in_rewards):
+        action_probs, ex_values, in_values                  = self.actor(states), self.ex_critic(states),  self.in_critic(states)
+        old_action_probs, old_ex_values, old_in_values      = self.actor_old(states), self.ex_critic_old(states),  self.in_critic_old(states)
+        next_ex_values, next_in_values                      = self.ex_critic(next_states),  self.in_critic(next_states)
+
+        # Don't update rnd value
+        obs             = self.utils.normalize(next_states, mean_obs, std_obs, self.clip_normalization)        
+        state_preds     = self.rnd_predict(obs)
+        state_targets   = self.rnd_target(obs)
+
+        loss            = self.get_PPO_loss(action_probs, ex_values, old_action_probs, old_ex_values, next_ex_values, actions, rewards, dones,
+                            state_preds, state_targets, in_values, old_in_values, next_in_values, std_in_rewards)
 
         self.actor_optimizer.zero_grad()
-        self.critic_optimizer.zero_grad()
+        self.ex_critic_optimizer.zero_grad()
+        self.in_critic_optimizer.zero_grad()
 
         loss.backward()
 
         self.actor_optimizer.step() 
-        self.critic_optimizer.step() 
+        self.ex_critic_optimizer.step() 
+        self.in_critic_optimizer.step() 
+
+    # Update the model
+    def update_rnd(self):        
+        batch_size  = int(len(self.obs_memory) / self.minibatch)
+        dataloader  = DataLoader(self.obs_memory, batch_size, shuffle = False)        
+
+        # Optimize policy for K epochs:
+        intrinsic_rewards = 0
+        for _ in range(self.RND_epochs):       
+            for obs in dataloader:
+                intrinsic_rewards = self.training_rnd(obs.float().to(device), self.obs_memory.mean_obs.float().to(device), self.obs_memory.std_obs.float().to(device))
+
+        # Clear the memory
+        self.obs_memory.clearMemory()
+
+        self.updateObsNormalizationParam(self.obs_memory.observations)
+        self.updateRwdNormalizationParam(intrinsic_rewards)
 
     # Update the model
     def update_ppo(self):        
@@ -348,34 +412,45 @@ class Agent():
         # Optimize policy for K epochs:
         for _ in range(self.PPO_epochs):       
             for states, actions, rewards, dones, next_states in dataloader:
-                self.training_ppo(states.float().to(device), actions.float().to(device), rewards.float().to(device), dones.float().to(device), next_states.float().to(device))
+                self.training_ppo(states.float().to(device), actions.float().to(device), rewards.float().to(device), dones.float().to(device), next_states.float().to(device),
+                    self.obs_memory.mean_obs.float().to(device), self.obs_memory.std_obs.float().to(device), self.obs_memory.std_in_rewards.float().to(device))
 
         # Clear the memory
         self.memory.clearMemory()
 
         # Copy new weights into old policy:
         self.actor_old.load_state_dict(self.actor.state_dict())
-        self.critic_old.load_state_dict(self.critic.state_dict())
+        self.ex_critic_old.load_state_dict(self.ex_critic.state_dict())
+        self.in_critic_old.load_state_dict(self.in_critic.state_dict())
 
     def save_weights(self):
         torch.save({
             'model_state_dict': self.actor.state_dict(),
-            'optimizer_state_dict': self.actor_optimizer.state_dict()
+            'optimizer_state_dict': self.actor_optimizer.state_dict(),
             }, '/test/My Drive/Bipedal4/actor.tar')
         
         torch.save({
-            'model_state_dict': self.critic.state_dict(),
-            'optimizer_state_dict': self.critic_optimizer.state_dict()
-            }, '/test/My Drive/Bipedal4/critic.tar')
+            'model_state_dict': self.ex_critic.state_dict(),
+            'optimizer_state_dict': self.ex_critic_optimizer.state_dict()
+            }, '/test/My Drive/Bipedal4/ex_critic.tar')
+
+        torch.save({
+            'model_state_dict': self.in_critic.state_dict(),
+            'optimizer_state_dict': self.in_critic_optimizer.state_dict()
+            }, '/test/My Drive/Bipedal4/in_critic.tar')
         
     def load_weights(self):
         actor_checkpoint = torch.load('/test/My Drive/Bipedal4/actor.tar')
         self.actor.load_state_dict(actor_checkpoint['model_state_dict'])
         self.actor_optimizer.load_state_dict(actor_checkpoint['optimizer_state_dict'])
 
-        critic_checkpoint = torch.load('/test/My Drive/Bipedal4/critic.tar')
-        self.critic.load_state_dict(critic_checkpoint['model_state_dict'])
-        self.critic_optimizer.load_state_dict(critic_checkpoint['optimizer_state_dict'])
+        ex_critic_checkpoint = torch.load('/test/My Drive/Bipedal4/ex_critic.tar')
+        self.ex_critic.load_state_dict(ex_critic_checkpoint['model_state_dict'])
+        self.ex_critic_optimizer.load_state_dict(ex_critic_checkpoint['optimizer_state_dict'])
+
+        in_critic_checkpoint = torch.load('/test/My Drive/Bipedal4/in_critic.tar')
+        self.in_critic.load_state_dict(in_critic_checkpoint['model_state_dict'])
+        self.in_critic_optimizer.load_state_dict(in_critic_checkpoint['optimizer_state_dict'])
 
 def plot(datas):
     print('----------')
@@ -389,6 +464,26 @@ def plot(datas):
     print('Max :', np.max(datas))
     print('Min :', np.min(datas))
     print('Avg :', np.mean(datas))
+
+def run_inits_episode(env, agent, state_dim, render, n_init_episode):
+    ############################################
+    env.reset()
+
+    for _ in range(n_init_episode):
+        action                  = env.action_space.sample()
+        next_state, _, done, _  = env.step(action)
+        agent.save_observation(next_state)
+
+        if render:
+            env.render()
+
+        if done:
+            env.reset()
+
+    agent.updateObsNormalizationParam()
+    agent.memory.clearObs()
+
+    return agent
 
 def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update):
     ############################################
