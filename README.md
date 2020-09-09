@@ -1,5 +1,5 @@
 ## Version 2
-Version 2 is not yet ready. You can use pytorch version of PPO & PPO_continous, but the rest is not yet finished. Still working to port PPO & PPO_continous from pytorch to tensorflow 2
+Version 2 is not yet ready. You can use pytorch version of PPO & PPO_continous, but the rest is not yet finished. Currently working on PPO_RND
 
 # PPO-RND
 
