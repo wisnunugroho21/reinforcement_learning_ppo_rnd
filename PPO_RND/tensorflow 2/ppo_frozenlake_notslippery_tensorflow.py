@@ -485,7 +485,6 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
             if t_updates % n_update == 0:
                 agent.update_rnd()
                 t_updates = 0
-                #print('update rnd')
         
         if done:           
             return total_reward, eps_time, t_updates           
@@ -511,8 +510,8 @@ def main():
     using_google_drive  = False
 
     render              = False # If you want to display the image, set this to True. Turn this off if you run this in Google Collab
-    n_step_update       = 32 # How many episode before you update the Policy. Recommended set to 128 for Discrete
-    n_eps_update        = 10
+    n_step_update       = 32 # How many steps before you update the RND. Recommended set to 128 for Discrete
+    n_eps_update        = 5 # How many episode before you update the PPO. Recommended set to 5 for Discrete
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
     n_saved             = 10 # How many episode to run before saving the weights
@@ -562,8 +561,7 @@ def main():
         batch_times.append(time)
 
         if i_episode % n_eps_update == 0:
-            agent.update_ppo()
-            #print('update ppo')           
+            agent.update_ppo()          
 
         if save_weights:
             if i_episode % n_saved == 0:
