@@ -60,7 +60,7 @@ There are two primary variants of PPO: PPO-Penalty and PPO-Clip.
 
 * PPO-Clip doesn’t have a KL-divergence term in the objective and doesn’t have a constraint at all. Instead relies on specialized clipping in the objective function to remove incentives for the new policy to get far from the old policy.
 
-This repository use PPO-Clip  
+OpenAI use PPO-Clip  
 You can read full detail of PPO in [here](https://spinningup.openai.com/en/latest/algorithms/ppo.html)
 
 ## Random Network Distillation
