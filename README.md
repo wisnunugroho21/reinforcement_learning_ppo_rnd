@@ -3,7 +3,7 @@
 Simple code to demonstrate Deep Reinforcement Learning by using Proximal Policy Optimization and Random Network Distillation in Tensorflow 2 and Pytorch
 
 ## Version 2 and Other Progress
-Version 2 will bring improvement in code quality and peformance. I refactor the code so it will follow algorithm in PPO's implementation on OpenAI's baseline. I also using newer version of PPO called Truly PPO, which has more sample efficiency and performance than OpenAI's PPO
+Version 2 will bring improvement in code quality and peformance. I refactor the code so it will follow algorithm in PPO's implementation on OpenAI's baseline. I also using newer version of PPO called Truly PPO, which has more sample efficiency and performance than OpenAI's PPO. Currently, I am focused on how to implement this project in more difficult environment (Atari games, MuJoCo, etc).
 
 - [x] Use Pytorch and Tensorflow 2
 - [x] Clean up the code
@@ -102,9 +102,6 @@ You can read full detail of Truly PPO in [here](https://arxiv.org/abs/1903.07940
 | Result Gif    |
 | ------------- |
 | ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/pong.gif) |
-
-## Future Development
-For now, I focus on how to implement this project on more difficult environment (Atari games, MuJoCo, etc)
 
 ## Contributing
 This project is far from finish and will be improved anytime . Any fix, contribute, or idea would be very appreciated
