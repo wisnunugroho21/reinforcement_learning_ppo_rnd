@@ -97,9 +97,9 @@ class ObsMemory(Dataset):
 
         self.mean_obs           = torch.zeros(state_dim).to(device)
         self.std_obs            = torch.zeros(state_dim).to(device)
-        self.std_in_rewards     = torch.FloatTensor([0]).to(device)
-        self.total_number_obs   = torch.FloatTensor([0]).to(device)
-        self.total_number_rwd   = torch.FloatTensor([0]).to(device)
+        self.std_in_rewards     = torch.zeros(1).to(device)
+        self.total_number_obs   = torch.zeros(1).to(device)
+        self.total_number_rwd   = torch.zeros(1).to(device)
 
     def __len__(self):
         return len(self.observations)
@@ -256,6 +256,8 @@ class Agent():
         self.obs_memory.save_eps(obs)
 
     def updateObsNormalizationParam(self, obs):
+        obs                 = torch.FloatTensor(obs).to(device).detach()
+
         mean_obs            = self.utils.countNewMean(self.obs_memory.mean_obs, self.obs_memory.total_number_obs, obs)
         std_obs             = self.utils.countNewStd(self.obs_memory.std_obs, self.obs_memory.total_number_obs, obs)
         total_number_obs    = len(obs) + self.obs_memory.total_number_obs
@@ -271,16 +273,16 @@ class Agent():
     # Loss for RND 
     def get_rnd_loss(self, state_pred, state_target):        
         # Don't update target state value
-        state_target = state_target.detach()
+        state_target = state_target.detach()        
         
         # Mean Squared Error Calculation between state and predict
-        forward_loss = (state_target - state_pred).pow(2).mean()
+        forward_loss = ((state_target - state_pred).pow(2) * 0.5).mean()
         return forward_loss
 
     # Loss for PPO  
     def get_PPO_loss(self, action_probs, ex_values, old_action_probs, old_ex_values, next_ex_values, actions, ex_rewards, dones, 
         state_preds, state_targets, in_values, old_in_values, next_in_values, std_in_rewards):
-
+      
         # Don't use old value in backpropagation
         Old_ex_values           = old_ex_values.detach()
 
@@ -290,10 +292,10 @@ class Agent():
         External_Advantages     = ((External_Advantages - External_Advantages.mean()) / (External_Advantages.std() + 1e-6)).detach()
 
         # Computing internal reward, then getting internal general advantages estimator
-        in_rewards              = (state_targets - state_preds).pow(2) / (std_in_rewards + 1e-8)
+        in_rewards              = (state_targets - state_preds).pow(2) * 0.5 / (std_in_rewards.mean() + 1e-8)
         Internal_Advantages     = self.policy_function.generalized_advantage_estimation(in_values, in_rewards, next_in_values, dones)
         Internal_Returns        = (Internal_Advantages + in_values).detach()
-        Internal_Advantages     = ((Internal_Advantages - Internal_Advantages.mean()) / (Internal_Advantages.std() + 1e-6)).detach()
+        Internal_Advantages     = ((Internal_Advantages - Internal_Advantages.mean()) / (Internal_Advantages.std() + 1e-6)).detach()        
 
         # Getting overall advantages
         Advantages              = (self.ex_advantages_coef * External_Advantages + self.in_advantages_coef * Internal_Advantages).detach()
@@ -324,10 +326,10 @@ class Agent():
         critic_ext_loss = torch.max(ex_vf_losses1, ex_vf_losses2).mean()      
 
         # Getting Intrinsic critic loss
-        critic_int_loss = (Internal_Returns - in_values).pow(2).mean()
+        critic_int_loss = (Internal_Returns - in_values).pow(2).mean() 
 
         # Getting overall critic loss
-        critic_loss     = (critic_ext_loss + critic_int_loss) * 0.5    
+        critic_loss     = (critic_ext_loss + critic_int_loss) * 0.5
 
         # We need to maximaze Policy Loss to make agent always find Better Rewards
         # and minimize Critic Loss 
@@ -370,7 +372,7 @@ class Agent():
         next_ex_values, next_in_values                      = self.ex_critic(next_states),  self.in_critic(next_states)
 
         # Don't update rnd value
-        obs             = self.utils.normalize(next_states, mean_obs, std_obs, self.clip_normalization)        
+        obs             = self.utils.normalize(next_states, mean_obs, std_obs, self.clip_normalization).detach()
         state_preds     = self.rnd_predict(obs)
         state_targets   = self.rnd_target(obs)
 
@@ -396,13 +398,13 @@ class Agent():
         intrinsic_rewards = 0
         for _ in range(self.RND_epochs):       
             for obs in dataloader:
-                intrinsic_rewards = self.training_rnd(obs.float().to(device), self.obs_memory.mean_obs.float().to(device), self.obs_memory.std_obs.float().to(device))
-
-        # Clear the memory
-        self.obs_memory.clearMemory()
+                intrinsic_rewards = self.training_rnd(obs.float().to(device), self.obs_memory.mean_obs.float().to(device), self.obs_memory.std_obs.float().to(device))       
 
         self.updateObsNormalizationParam(self.obs_memory.observations)
         self.updateRwdNormalizationParam(intrinsic_rewards)
+
+        # Clear the memory
+        self.obs_memory.clearMemory()
 
     # Update the model
     def update_ppo(self):        
@@ -472,6 +474,7 @@ def run_inits_episode(env, agent, state_dim, render, n_init_episode):
     for _ in range(n_init_episode):
         action                  = env.action_space.sample()
         next_state, _, done, _  = env.step(action)
+        next_state              = to_categorical(next_state, num_classes = state_dim)
         agent.save_observation(next_state)
 
         if render:
@@ -480,14 +483,14 @@ def run_inits_episode(env, agent, state_dim, render, n_init_episode):
         if done:
             env.reset()
 
-    agent.updateObsNormalizationParam()
+    agent.updateObsNormalizationParam(agent.obs_memory.observations)
     agent.memory.clearObs()
 
     return agent
 
 def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update):
     ############################################
-    state           = env.reset()
+    state           = to_categorical(env.reset(), num_classes = state_dim)
     done            = False
     total_reward    = 0
     eps_time        = 0
@@ -496,13 +499,15 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     while not done:
         action                      = int(agent.act(state))
         next_state, reward, done, _ = env.step(action)
+        next_state                  = to_categorical(next_state, num_classes = state_dim)
         
         eps_time        += 1 
         t_updates       += 1
         total_reward    += reward
 
         if training_mode:
-            agent.save_eps(state.tolist(), float(action), float(reward), float(done), next_state.tolist()) 
+            agent.save_eps(state.tolist(), float(action), float(reward), float(done), next_state.tolist())
+            agent.save_observation(next_state)
             
         state   = next_state
                 
@@ -511,13 +516,26 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
         
         if training_mode:
             if t_updates % n_update == 0:
-                agent.update_ppo()
+                agent.update_rnd()
                 t_updates = 0
+                #print('update rnd')
         
         if done:           
             return total_reward, eps_time, t_updates           
 
 def main():
+    try:
+        register(
+            id='FrozenLakeNotSlippery-v0',
+            entry_point='gym.envs.toy_text:FrozenLakeEnv',
+            kwargs={'map_name' : '4x4', 'is_slippery': False},
+            max_episode_steps=100,
+            reward_threshold=0.8196, # optimum = .8196
+        )
+
+        print('Env FrozenLakeNotSlippery has not yet initialized. \nInitializing now...')
+    except:
+        print('Env FrozenLakeNotSlippery has been initialized')
     ############## Hyperparameters ##############
     load_weights        = False # If you want to load the agent, set this to True
     save_weights        = False # If you want to save the agent, set this to True
@@ -526,7 +544,8 @@ def main():
     using_google_drive  = False
 
     render              = False # If you want to display the image, set this to True. Turn this off if you run this in Google Collab
-    n_update            = 128 # How many episode before you update the Policy. Recommended set to 128 for Discrete
+    n_step_update       = 32 # How many episode before you update the Policy. Recommended set to 128 for Discrete
+    n_eps_update        = 10
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
     n_saved             = 10 # How many episode to run before saving the weights
@@ -536,14 +555,14 @@ def main():
     value_clip          = 1.0 # How many value will be clipped. Recommended set to the highest or lowest possible reward
     entropy_coef        = 0.05 # How much randomness of action you will get
     vf_loss_coef        = 1.0 # Just set to 1
-    minibatch           = 4 # How many batch per update. size of batch = n_update / minibatch. Recommended set to 4 for Discrete
+    minibatch           = 1 # How many batch per update. size of batch = n_update / minibatch. Recommended set to 4 for Discrete
     PPO_epochs          = 4 # How many epoch per update. Recommended set to 10 for Discrete
     
     gamma               = 0.99 # Just set to 0.99
     lam                 = 0.95 # Just set to 0.95
     learning_rate       = 2.5e-4 # Just set to 0.95
     ############################################# 
-    env_name            = 'Env Name' # Set the env you want
+    env_name            = 'FrozenLakeNotSlippery-v0' # Set the env you want
     env                 = gym.make(env_name)
 
     state_dim           = env.observation_space.n
@@ -570,10 +589,14 @@ def main():
     t_updates           = 0
 
     for i_episode in range(1, n_episode + 1):
-        total_reward, time, t_updates = run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update)
+        total_reward, time, t_updates = run_episode(env, agent, state_dim, render, training_mode, t_updates, n_step_update)
         print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, total_reward, time))
         batch_rewards.append(int(total_reward))
-        batch_times.append(time)        
+        batch_times.append(time)
+
+        if i_episode % n_eps_update == 0:
+            agent.update_ppo()
+            #print('update ppo')           
 
         if save_weights:
             if i_episode % n_saved == 0:
