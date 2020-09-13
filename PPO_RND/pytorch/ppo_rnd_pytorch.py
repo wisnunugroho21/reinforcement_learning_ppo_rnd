@@ -123,7 +123,7 @@ class ObsMemory(Dataset):
         del self.observations[:]
 
 class Memory(Dataset):
-    def __init__(self, state_dim):
+    def __init__(self):
         self.actions        = [] 
         self.states         = []
         self.rewards        = []
@@ -229,7 +229,7 @@ class Agent():
         self.rnd_predict_optimizer  = Adam(self.rnd_predict.parameters(), lr = learning_rate)
         self.rnd_target             = RND_Model(state_dim, action_dim)
 
-        self.memory                 = Memory(state_dim)
+        self.memory                 = Memory()
         self.obs_memory             = ObsMemory(state_dim)
 
         self.policy_function        = PolicyFunction(gamma, lam)  
@@ -367,14 +367,14 @@ class Agent():
 
     # Get loss and Do backpropagation
     def training_ppo(self, states, actions, rewards, dones, next_states, mean_obs, std_obs, std_in_rewards):
-        action_probs, ex_values, in_values                  = self.actor(states), self.ex_critic(states),  self.in_critic(states)
-        old_action_probs, old_ex_values, old_in_values      = self.actor_old(states), self.ex_critic_old(states),  self.in_critic_old(states)
-        next_ex_values, next_in_values                      = self.ex_critic(next_states),  self.in_critic(next_states)
-
         # Don't update rnd value
         obs             = self.utils.normalize(next_states, mean_obs, std_obs, self.clip_normalization).detach()
         state_preds     = self.rnd_predict(obs)
         state_targets   = self.rnd_target(obs)
+
+        action_probs, ex_values, in_values                  = self.actor(states), self.ex_critic(states),  self.in_critic(states)
+        old_action_probs, old_ex_values, old_in_values      = self.actor_old(states), self.ex_critic_old(states),  self.in_critic_old(states)
+        next_ex_values, next_in_values                      = self.ex_critic(next_states),  self.in_critic(next_states)       
 
         loss            = self.get_PPO_loss(action_probs, ex_values, old_action_probs, old_ex_values, next_ex_values, actions, rewards, dones,
                             state_preds, state_targets, in_values, old_in_values, next_in_values, std_in_rewards)
@@ -474,7 +474,6 @@ def run_inits_episode(env, agent, state_dim, render, n_init_episode):
     for _ in range(n_init_episode):
         action                  = env.action_space.sample()
         next_state, _, done, _  = env.step(action)
-        next_state              = to_categorical(next_state, num_classes = state_dim)
         agent.save_observation(next_state)
 
         if render:
@@ -490,7 +489,7 @@ def run_inits_episode(env, agent, state_dim, render, n_init_episode):
 
 def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update):
     ############################################
-    state           = to_categorical(env.reset(), num_classes = state_dim)
+    state           = env.reset()
     done            = False
     total_reward    = 0
     eps_time        = 0
@@ -499,7 +498,6 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     while not done:
         action                      = int(agent.act(state))
         next_state, reward, done, _ = env.step(action)
-        next_state                  = to_categorical(next_state, num_classes = state_dim)
         
         eps_time        += 1 
         t_updates       += 1
@@ -524,18 +522,6 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
             return total_reward, eps_time, t_updates           
 
 def main():
-    try:
-        register(
-            id='FrozenLakeNotSlippery-v0',
-            entry_point='gym.envs.toy_text:FrozenLakeEnv',
-            kwargs={'map_name' : '4x4', 'is_slippery': False},
-            max_episode_steps=100,
-            reward_threshold=0.8196, # optimum = .8196
-        )
-
-        print('Env FrozenLakeNotSlippery has not yet initialized. \nInitializing now...')
-    except:
-        print('Env FrozenLakeNotSlippery has been initialized')
     ############## Hyperparameters ##############
     load_weights        = False # If you want to load the agent, set this to True
     save_weights        = False # If you want to save the agent, set this to True
@@ -562,7 +548,7 @@ def main():
     lam                 = 0.95 # Just set to 0.95
     learning_rate       = 2.5e-4 # Just set to 0.95
     ############################################# 
-    env_name            = 'FrozenLakeNotSlippery-v0' # Set the env you want
+    env_name            = 'Env Name' # Set the env you want
     env                 = gym.make(env_name)
 
     state_dim           = env.observation_space.n
