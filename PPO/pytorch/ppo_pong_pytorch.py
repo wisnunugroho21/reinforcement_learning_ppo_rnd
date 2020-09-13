@@ -4,112 +4,114 @@ from gym.envs.registration import register
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical
+from torch.distributions.kl import kl_divergence
+from torch.utils.data import Dataset, DataLoader
+from torch.optim import Adam
+import torchvision
+
 import matplotlib.pyplot as plt
 import numpy as np
+import sys
+import numpy
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")  
 dataType = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-      
-class PPO_Model(nn.Module):
+
+class Utils():
+    def prepro(self, I):
+        I = I[35:195] # crop
+        I = I[::2,::2, 0] # downsample by factor of 2
+        I[I == 144] = 0 # erase background (background type 1)
+        I[I == 109] = 0 # erase background (background type 2)
+        I[I != 0] = 1 # everything else (paddles, ball) just set to 1
+        X = I.astype(np.float32).ravel() # Combine items in 1 array 
+        return X
+
+class Actor_Model(nn.Module):
     def __init__(self, state_dim, action_dim):
-        super(PPO_Model, self).__init__()
-        
-        # Actor
-        self.actor_layer = nn.Sequential(
-                nn.Linear(state_dim, 64),
+        super(Actor_Model, self).__init__()   
+
+        self.nn_layer = nn.Sequential(
+                nn.Linear(state_dim, 640),
                 nn.ReLU(),
-                nn.Linear(64, 64),
+                nn.Linear(640, 640),
                 nn.ReLU(),
-                nn.Linear(64, action_dim),
+                nn.Linear(640, action_dim),
                 nn.Softmax(-1)
               ).float().to(device)
         
-        # Intrinsic Critic
-        self.value_layer = nn.Sequential(
-                nn.Linear(state_dim, 64),
+    def forward(self, states):
+        return self.nn_layer(states)
+
+class Critic_Model(nn.Module):
+    def __init__(self, state_dim, action_dim):
+        super(Critic_Model, self).__init__()   
+
+        self.nn_layer = nn.Sequential(
+                nn.Linear(state_dim, 640),
                 nn.ReLU(),
-                nn.Linear(64, 64),
+                nn.Linear(640, 640),
                 nn.ReLU(),
-                nn.Linear(64, 1)
+                nn.Linear(640, 1)
               ).float().to(device)
         
-    # Init wieghts to make training faster
-    # But don't init weight if you load weight from file
-    def lets_init_weights(self):      
-        self.actor_layer.apply(self.init_weights)
-        self.value_layer.apply(self.init_weights)
-        
-    def init_weights(self, m):
-        for name, param in m.named_parameters():
-            if 'bias' in name:
-               nn.init.constant_(param, 0.01)
-            elif 'weight' in name:
-                nn.init.kaiming_uniform_(param, mode = 'fan_in', nonlinearity = 'relu')
-        
-    def forward(self, state, is_act = False, is_value = False):
-        if is_act and not is_value: 
-            return self.actor_layer(state)
-        elif is_value and not is_act: 
-            return self.value_layer(state)
-        else:
-            return self.actor_layer(state), self.value_layer(state)
+    def forward(self, states):
+        return self.nn_layer(states)
 
-class Memory:
+class Memory(Dataset):
     def __init__(self):
-        self.actions = []
-        self.states = []
-        self.rewards = []
-        self.dones = []     
-        self.next_states = []
-        
-    def save_eps(self, state, reward, action, done, next_state):
+        self.actions        = [] 
+        self.states         = []
+        self.rewards        = []
+        self.dones          = []     
+        self.next_states    = []
+
+    def __len__(self):
+        return len(self.dones)
+
+    def __getitem__(self, idx):
+        return np.array(self.states[idx], dtype = np.float32), np.array(self.actions[idx], dtype = np.float32), np.array([self.rewards[idx]], dtype = np.float32), np.array([self.dones[idx]], dtype = np.float32), np.array(self.next_states[idx], dtype = np.float32)      
+
+    def save_eps(self, state, action, reward, done, next_state):
         self.rewards.append(reward)
         self.states.append(state)
         self.actions.append(action)
         self.dones.append(done)
-        self.next_states.append(next_state)
-                
+        self.next_states.append(next_state)        
+
     def clearMemory(self):
         del self.actions[:]
         del self.states[:]
         del self.rewards[:]
         del self.dones[:]
-        del self.next_states[:]
-                
-class Utils:
-    def __init__(self):
-        self.gamma = 0.95
-        self.lam = 0.99
+        del self.next_states[:]  
 
-    # Categorical Distribution is used for Discrete Action Environment
-    # The neural network output the probability of actions (Stochastic policy), then pass it to Categorical Distribution
-    
+class Distributions():
     def sample(self, datas):
-        distribution = Categorical(datas)      
+        distribution = Categorical(datas)
         return distribution.sample().float().to(device)
         
     def entropy(self, datas):
-        distribution = Categorical(datas)            
+        distribution = Categorical(datas)    
         return distribution.entropy().float().to(device)
       
     def logprob(self, datas, value_data):
         distribution = Categorical(datas)
-        return distribution.log_prob(value_data).float().to(device)      
-      
-    def normalize(self, data):
-        data_normalized = (data - torch.mean(data)) / torch.std(data)
-        return data_normalized
-      
-    def to_numpy(self, datas):
-        if torch.cuda.is_available():
-            datas = datas.cpu().detach().numpy()
-        else:
-            datas = datas.detach().numpy()            
-        return datas        
-      
+        return distribution.log_prob(value_data).unsqueeze(1).float().to(device)
+
+    def kl_divergence(self, datas1, datas2):
+        distribution1 = Categorical(datas1)
+        distribution2 = Categorical(datas2)
+
+        return kl_divergence(distribution1, distribution2).unsqueeze(1).float().to(device)  
+
+class PolicyFunction():
+    def __init__(self, gamma = 0.99, lam = 0.95):
+        self.gamma  = gamma
+        self.lam    = lam
+
     def monte_carlo_discounted(self, datas):
-        # Discounting future reward        
-        returns = []        
+        returns     = []        
         running_add = 0
         
         for i in reversed(range(len(datas))):
@@ -117,256 +119,288 @@ class Utils:
             returns.insert(0, running_add)
             
         return torch.stack(returns)
-
-    def temporal_difference(self, rewards, next_values, dones):
-        # Computing temporal difference
-        TD = rewards + self.gamma * next_values * (1 - dones)        
-        return TD
       
-    def generalized_advantage_estimation(self, values, rewards, next_value, done):
-        # Computing general advantages estimator
-        gae = 0
-        returns = []
-        
-        for step in reversed(range(len(rewards))):   
-            delta = rewards[step] + self.gamma * next_value[step] * (1 - done[step]) - values[step]
-            gae = delta + self.gamma * self.lam * gae
-            returns.insert(0, gae)
+    def temporal_difference(self, reward, next_value, done):
+        q_values = reward + (1 - done) * self.gamma * next_value           
+        return q_values
+      
+    def generalized_advantage_estimation(self, values, rewards, next_values, dones):
+        gae     = 0
+        adv     = []     
+
+        delta   = rewards + (1.0 - dones) * self.gamma * next_values - values          
+        for step in reversed(range(len(rewards))):  
+            gae = delta[step] + (1.0 - dones[step]) * self.gamma * self.lam * gae
+            adv.insert(0, gae)
             
-        return torch.stack(returns)
+        return torch.stack(adv)
 
-    def prepro(self, I):
-        I = I[35:195] # crop
-        I = I[::2,::2, 0] # downsample by factor of 2
-        I[I == 144] = 0 # erase background (background type 1)
-        I[I == 109] = 0 # erase background (background type 2)
-        I[I != 0] = 1 # everything else (paddles, ball) just set to 1
-        
-        X = I.astype(np.float32).ravel() # Combine items in 1 array 
-        return X
-        
-class Agent:  
-    def __init__(self, state_dim, action_dim, is_training_mode):        
-        self.policy_clip = 0.1 
-        self.value_clip = 0.1      
-        self.entropy_coef = 0.01
-        self.vf_loss_coef = 0.5
-        self.is_training_mode = is_training_mode
-        self.PPO_epochs = 5
-        
-        self.policy = PPO_Model(state_dim, action_dim)
-        self.policy_old = PPO_Model(state_dim, action_dim)
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr = 2.5e-4)
+class Agent():  
+    def __init__(self, state_dim, action_dim, is_training_mode, policy_kl_range, policy_params, value_clip, entropy_coef, vf_loss_coef,
+                 minibatch, PPO_epochs, gamma, lam, learning_rate):        
+        self.policy_kl_range    = policy_kl_range 
+        self.policy_params      = policy_params
+        self.value_clip         = value_clip    
+        self.entropy_coef       = entropy_coef
+        self.vf_loss_coef       = vf_loss_coef
+        self.minibatch          = minibatch       
+        self.PPO_epochs         = PPO_epochs
+        self.is_training_mode   = is_training_mode
+        self.action_dim         = action_dim               
 
-        self.memory = Memory()
-        self.utils = Utils()        
-        
-    def save_eps(self, state, reward, action, done, next_state):
-        self.memory.save_eps(state, reward, action, done, next_state)
-        
-    # Loss for PPO
-    def get_loss(self, states, actions, rewards, next_states, dones):      
-        action_probs, values  = self.policy(states)  
-        old_action_probs, old_values = self.policy_old(states)
-        next_values  = self.policy(next_states, is_value = True)
-        
-        # Don't update old value
-        old_values = old_values.detach()
-                
-        # Getting entropy from the action probability
-        dist_entropy = self.utils.entropy(action_probs).mean()
+        self.actor              = Actor_Model(state_dim, action_dim)
+        self.actor_old          = Actor_Model(state_dim, action_dim)
+        self.actor_optimizer    = Adam(self.actor.parameters(), lr = learning_rate)
 
-        # Getting external general advantages estimator
-        advantages = self.utils.generalized_advantage_estimation(values, rewards, next_values, dones).detach()
-        returns = self.utils.temporal_difference(rewards, next_values, dones).detach()
-        
-        # Getting External critic loss by using Clipped critic value
-        vpredclipped = old_values + torch.clamp(values - old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
-        vf_losses1 = (returns - values).pow(2) # Mean Squared Error
-        vf_losses2 = (returns - vpredclipped).pow(2) # Mean Squared Error
-        critic_loss = torch.max(vf_losses1, vf_losses2).mean() * 0.5
+        self.critic             = Critic_Model(state_dim, action_dim)
+        self.critic_old         = Critic_Model(state_dim, action_dim)
+        self.critic_optimizer   = Adam(self.critic.parameters(), lr = learning_rate)
 
-        # Finding the ratio (pi_theta / pi_theta__old):  
-        logprobs = self.utils.logprob(action_probs, actions) 
-        old_logprobs = self.utils.logprob(old_action_probs, actions).detach()
-        
-        # Finding Surrogate Loss:
-        ratios = torch.exp(logprobs - old_logprobs) # ratios = old_logprobs / logprobs
-        surr1 = ratios * advantages
-        surr2 = torch.clamp(ratios, 1 - self.policy_clip, 1 + self.policy_clip) * advantages
-        pg_loss = torch.min(surr1, surr2).mean()           
-        
+        self.memory             = Memory()
+        self.policy_function    = PolicyFunction(gamma, lam)  
+        self.distributions      = Distributions()
+
+        if is_training_mode:
+          self.actor.train()
+          self.critic.train()
+        else:
+          self.actor.eval()
+          self.critic.eval()
+
+    def save_eps(self, state, action, reward, done, next_state):
+        self.memory.save_eps(state, action, reward, done, next_state)
+
+    # Loss for PPO  
+    def get_loss(self, action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones):
+        # Don't use old value in backpropagation
+        Old_values      = old_values.detach()
+
+        # Getting general advantages estimator
+        Advantages      = self.policy_function.generalized_advantage_estimation(values, rewards, next_values, dones)
+        Returns         = (Advantages + values).detach()
+        Advantages      = ((Advantages - Advantages.mean()) / (Advantages.std() + 1e-6)).detach()
+
+        # Finding the ratio (pi_theta / pi_theta__old):        
+        logprobs        = self.distributions.logprob(action_probs, actions)
+        Old_logprobs    = self.distributions.logprob(old_action_probs, actions).detach()
+        ratios          = (logprobs - Old_logprobs).exp() # ratios = old_logprobs / logprobs
+
+        # Finding KL Divergence                
+        Kl              = self.distributions.kl_divergence(old_action_probs, action_probs)
+
+        # Combining TR-PPO with Rollback (Truly PPO)
+        pg_loss         = torch.where(
+                (Kl >= self.policy_kl_range) & (ratios >= 1),
+                ratios * Advantages - self.policy_params * Kl,
+                ratios * Advantages - self.policy_kl_range
+        ) 
+        pg_loss         = pg_loss.mean()
+
+        # Getting entropy from the action probability 
+        dist_entropy    = self.distributions.entropy(action_probs).mean()
+
+        # Getting critic loss by using Clipped critic value
+        vpredclipped    = old_values + torch.clamp(values - Old_values, -self.value_clip, self.value_clip) # Minimize the difference between old value and new value
+        vf_losses1      = (Returns - values).pow(2) * 0.5 # Mean Squared Error
+        vf_losses2      = (Returns - vpredclipped).pow(2) * 0.5 # Mean Squared Error        
+        critic_loss     = torch.max(vf_losses1, vf_losses2).mean()                
+
         # We need to maximaze Policy Loss to make agent always find Better Rewards
-        # and minimize Critic Loss and 
-        loss = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss 
+        # and minimize Critic Loss 
+        loss            = (critic_loss * self.vf_loss_coef) - (dist_entropy * self.entropy_coef) - pg_loss
         return loss       
-      
+
     def act(self, state):
-        state = torch.FloatTensor(state).to(device)      
-        action_probs = self.policy_old(state, is_act = True)
+        state           = torch.FloatTensor(state).unsqueeze(0).to(device).detach()
+        action_probs    = self.actor(state)
         
+        # We don't need sample the action in Test Mode
+        # only sampling the action in Training Mode in order to exploring the actions
         if self.is_training_mode:
             # Sample the action
-            action = self.utils.sample(action_probs)
-            return action.cpu().item() 
+            action  = self.distributions.sample(action_probs) 
         else:
-            return action_probs.max(1)[1].view(1, 1)
-        
-    # Update the PPO part (the actor and value)
+            action  = torch.argmax(action_probs, 1)  
+              
+        return action.cpu().item()
+
+    # Get loss and Do backpropagation
+    def training_ppo(self, states, actions, rewards, dones, next_states):
+        action_probs, values            = self.actor(states), self.critic(states)
+        old_action_probs, old_values    = self.actor_old(states), self.critic_old(states)
+        next_values                     = self.critic(next_states)
+
+        loss    = self.get_loss(action_probs, values, old_action_probs, old_values, next_values, actions, rewards, dones)
+
+        self.actor_optimizer.zero_grad()
+        self.critic_optimizer.zero_grad()
+
+        loss.backward()
+
+        self.actor_optimizer.step() 
+        self.critic_optimizer.step() 
+
+    # Update the model
     def update_ppo(self):        
-        length = len(self.memory.states)
+        batch_size  = int(len(self.memory) / self.minibatch)
+        dataloader  = DataLoader(self.memory, batch_size, shuffle = False)
 
-        # Convert list in tensor
-        states = torch.FloatTensor(self.memory.states).to(device).detach()
-        actions = torch.FloatTensor(self.memory.actions).to(device).detach()
-        rewards = torch.FloatTensor(self.memory.rewards).view(length, 1).to(device).detach()
-        dones = torch.FloatTensor(self.memory.dones).view(length, 1).to(device).detach()
-        next_states = torch.FloatTensor(self.memory.next_states).to(device).detach()
-                
         # Optimize policy for K epochs:
-        for epoch in range(self.PPO_epochs):
-            loss = self.get_loss(states, actions, rewards, next_states, dones)          
-                        
-            self.policy_optimizer.zero_grad()
-            loss.backward()                    
-            self.policy_optimizer.step() 
+        for _ in range(self.PPO_epochs):       
+            for states, actions, rewards, dones, next_states in dataloader:
+                self.training_ppo(states.float().to(device), actions.float().to(device), rewards.float().to(device), dones.float().to(device), next_states.float().to(device))
 
-        # Clear state, action, reward in memory    
+        # Clear the memory
         self.memory.clearMemory()
-        
+
         # Copy new weights into old policy:
-        self.policy_old.load_state_dict(self.policy.state_dict())
-        
+        self.actor_old.load_state_dict(self.actor.state_dict())
+        self.critic_old.load_state_dict(self.critic.state_dict())
+
     def save_weights(self):
-        torch.save(self.policy.state_dict(), '/test/Your Folder/actor_pong_ppo_rnd.pth')
-        torch.save(self.policy_old.state_dict(), '/test/Your Folder/old_actor_pong_ppo_rnd.pth')
+        torch.save({
+            'model_state_dict': self.actor.state_dict(),
+            'optimizer_state_dict': self.actor_optimizer.state_dict()
+            }, '/test/My Drive/Bipedal4/actor.tar')
+        
+        torch.save({
+            'model_state_dict': self.critic.state_dict(),
+            'optimizer_state_dict': self.critic_optimizer.state_dict()
+            }, '/test/My Drive/Bipedal4/critic.tar')
         
     def load_weights(self):
-        self.policy.load_state_dict(torch.load('/test/Your Folder/actor_pong_ppo_rnd.pth'))        
-        self.policy_old.load_state_dict(torch.load('/test/Your Folder/old_actor_pong_ppo_rnd.pth')) 
-        
-    def lets_init_weights(self):
-        self.policy.lets_init_weights()
-        self.policy_old.lets_init_weights()     
-        
+        actor_checkpoint = torch.load('/test/My Drive/Bipedal4/actor.tar')
+        self.actor.load_state_dict(actor_checkpoint['model_state_dict'])
+        self.actor_optimizer.load_state_dict(actor_checkpoint['optimizer_state_dict'])
+
+        critic_checkpoint = torch.load('/test/My Drive/Bipedal4/critic.tar')
+        self.critic.load_state_dict(critic_checkpoint['model_state_dict'])
+        self.critic_optimizer.load_state_dict(critic_checkpoint['optimizer_state_dict'])
+
 def plot(datas):
     print('----------')
-    
+
     plt.plot(datas)
     plt.plot()
     plt.xlabel('Episode')
     plt.ylabel('Datas')
     plt.show()
-    
+
     print('Max :', np.max(datas))
     print('Min :', np.min(datas))
     print('Avg :', np.mean(datas))
 
-def run_episode(env, agent, state_dim, render, training_mode):
-    utils = Utils()
+def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update):
+    utils           = Utils()
     ############################################
-    obs = env.reset()
-    obs = utils.prepro(state)
-    state = obs
-    
-    done = False
-    total_reward = 0
-    eps_time = 0
+    obs             = env.reset()
+    obs             = utils.prepro(obs)
+    state           = obs
+
+    done            = False
+    total_reward    = 0
+    eps_time        = 0
     ############################################
     
     while not done:
-        action = int(agent.act(state))        
-        if action == 1:
-            action_gym = 2 # Up
-        elif action == 2:
-            action_gym = 3 # Down
-        elif action == 0: 
-            action_gym = 0 # Nothing / Stay       
+        action                      = int(agent.act(state))
+        action_gym                  = action + 1 if action != 0 else 0
+
+        next_obs, reward, done, _   = env.step(action_gym)
+        next_obs                    = utils.prepro(next_obs)
+        next_state                  = next_obs - obs
         
-        next_obs, reward, done, info = env.step(action_gym)
-        next_obs = utils.prepro(next_obs)
-        next_state = next_obs - obs
-        
-        eps_time += 1 
-        total_reward += reward 
-          
+        eps_time        += 1 
+        t_updates       += 1
+        total_reward    += reward
+
         if training_mode:
-            agent.save_eps(state, reward, action, done, next_state) 
+            agent.save_eps(state.tolist(), float(action), float(reward), float(done), next_state.tolist()) 
             
-        state = next_state
-        obs = next_obs     
+        state   = next_state 
+        obs     = next_obs
                 
         if render:
             env.render()
-        if done:
-            return total_reward, eps_time
-    
+        
+        if training_mode:
+            if t_updates % n_update == 0:
+                agent.update_ppo()
+                t_updates = 0
+        
+        if done:           
+            return total_reward, eps_time, t_updates           
+
 def main():
     ############## Hyperparameters ##############
-    using_google_drive = False # If you using Google Colab and want to save the agent to your GDrive, set this to True
-    load_weights = True # If you want to load the agent, set this to True
-    save_weights = False # If you want to save the agent, set this to True
-    training_mode = False # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
-    reward_threshold = 20 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
+    load_weights        = False # If you want to load the agent, set this to True
+    save_weights        = False # If you want to save the agent, set this to True
+    training_mode       = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
+    reward_threshold    = 300 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
+    using_google_drive  = False
+
+    render              = False # If you want to display the image. Turn this off if you run this in Google Collab
+    n_update            = 128 # How many episode before you update the Policy. Recommended set to 128 for Discrete
+    n_plot_batch        = 100000000 # How many episode you want to plot the result
+    n_episode           = 100000 # How many episode you want to run
+    n_saved             = 10 # How many episode to run before saving the weights
+
+    policy_kl_range     = 0.0008 # Set to 0.0008 for Discrete
+    policy_params       = 20 # Set to 20 for Discrete
+    value_clip          = 1.0 # How many value will be clipped. Recommended set to the highest or lowest possible reward
+    entropy_coef        = 0.05 # How much randomness of action you will get
+    vf_loss_coef        = 1.0 # Just set to 1
+    minibatch           = 4 # How many batch per update. size of batch = n_update / minibatch. Recommended set to 4 for Discrete
+    PPO_epochs          = 4 # How many epoch per update. Recommended set to 10 for Discrete
     
-    render = True # If you want to display the image. Turn this off if you run this in Google Collab
-    n_update = 1 # How many episode before you update the Policy
-    n_plot_batch = 100 # How many episode you want to plot the result
-    n_episode = 10000 # How many episode you want to run
-    #############################################         
-    env_name = "PongDeterministic-v4"
-    env = gym.make(env_name)
-    state_dim = 6400
-    action_dim = 3
-        
-    utils = Utils()     
-    agent = Agent(state_dim, action_dim)  
+    gamma               = 0.99 # Just set to 0.99
+    lam                 = 0.95 # Just set to 0.95
+    learning_rate       = 2.5e-4 # Just set to 0.95
     ############################################# 
-    
+    env_name            = 'Pong-v4' # Set the env you want
+    env                 = gym.make(env_name)
+
+    state_dim           = env.observation_space.shape[0]
+    action_dim          = env.action_space.n
+
+    agent               = Agent(state_dim, action_dim, training_mode, policy_kl_range, policy_params, value_clip, entropy_coef, vf_loss_coef,
+                            minibatch, PPO_epochs, gamma, lam, learning_rate)  
+    #############################################     
     if using_google_drive:
         from google.colab import drive
         drive.mount('/test')
-    
+
     if load_weights:
         agent.load_weights()
         print('Weight Loaded')
-    '''else :
-        agent.lets_init_weights()
-        print('Init Weight')'''
-    
-    if torch.cuda.is_available() :
-        print('Using GPU')
-    
-    rewards = []   
-    batch_rewards = []
+
+    rewards             = []   
+    batch_rewards       = []
     batch_solved_reward = []
-    
-    times = []
-    batch_times = []
 
-    total_time = 0
-    
+    times               = []
+    batch_times         = []
+
+    t_updates           = 0
+
     for i_episode in range(1, n_episode + 1):
-        total_reward, time = run_episode(env, agent, state_dim, render, training_mode)
-        print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, int(total_reward), time))
+        total_reward, time, t_updates = run_episode(env, agent, state_dim, render, training_mode, t_updates, n_update)
+        print('Episode {} \t t_reward: {} \t time: {} \t '.format(i_episode, total_reward, time))
         batch_rewards.append(int(total_reward))
-        batch_times.append(time)
+        batch_times.append(time)        
 
-        if training_mode:
-            if i_episode % n_update == 0:
-                agent.update_ppo()
-        
         if save_weights:
-            agent.save_weights()  
-            print('weights saved')
-                            
+            if i_episode % n_saved == 0:
+                agent.save_weights() 
+                print('weights saved')
+
         if reward_threshold:
             if len(batch_solved_reward) == 100:            
                 if np.mean(batch_solved_reward) >= reward_threshold :              
-                    for reward in batch_times:
+                    for reward in batch_rewards:
                         rewards.append(reward)
 
-                    for time in batch_rewards:
+                    for time in batch_times:
                         times.append(time)                    
 
                     print('You solved task after {} episode'.format(len(rewards)))
@@ -378,30 +412,30 @@ def main():
 
             else:
                 batch_solved_reward.append(total_reward)
-            
+
         if i_episode % n_plot_batch == 0 and i_episode != 0:
             # Plot the reward, times for every n_plot_batch
             plot(batch_rewards)
             plot(batch_times)
-            
-            for reward in batch_times:
+
+            for reward in batch_rewards:
                 rewards.append(reward)
-                
-            for time in batch_rewards:
+
+            for time in batch_times:
                 times.append(time)
-                
-            batch_rewards = []
-            batch_times = []
+
+            batch_rewards   = []
+            batch_times     = []
 
             print('========== Cummulative ==========')
             # Plot the reward, times for every episode
             plot(rewards)
             plot(times)
-            
+
     print('========== Final ==========')
      # Plot the reward, times for every episode
     plot(rewards)
     plot(times) 
-            
+
 if __name__ == '__main__':
     main()

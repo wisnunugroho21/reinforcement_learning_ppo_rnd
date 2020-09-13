@@ -2,6 +2,15 @@
 
 Simple code to demonstrate Deep Reinforcement Learning by using Proximal Policy Optimization and Random Network Distillation in Tensorflow 2 and Pytorch
 
+## Version 2 and Other Progress
+Version 2 will bring improvement in code quality and peformance. I refactor the code so it will follow algorithm in PPO's implementation on OpenAI's baseline. I also using newer version of PPO called Truly PPO, which has more sample efficiency and performance than OpenAI's PPO. Currently, I am focused on how to implement this project in more difficult environment (Atari games, MuJoCo, etc).
+
+- [x] Use Pytorch and Tensorflow 2
+- [x] Clean up the code
+- [x] Use Truly PPO
+- [ ] Add more complex environment
+- [ ] Add more explanation
+
 ## Getting Started
 
 This project is using Pytorch and Tensorflow 2 for Deep Learning Framework and using Gym for Reinforcement Learning Environment.  
@@ -62,6 +71,12 @@ RND incentivizes visiting unfamiliar states by measuring how hard it is to predi
 
 You can read full detail of RND in [here](https://openai.com/blog/reinforcement-learning-with-prediction-based-rewards/)
 
+## Truly Proximal Policy Optimization
+
+Proximal policy optimization (PPO) is one of the most successful deep reinforcement-learning methods, achieving state-of-the-art performance across a wide range of challenging tasks. However, its optimization behavior is still far from being fully understood. In this paper, we show that PPO could neither strictly restrict the likelihood ratio as it attempts to do nor enforce a well-defined trust region constraint, which means that it may still suffer from the risk of performance instability. To address this issue, we present an enhanced PPO method, named Truly PPO. Two critical improvements are made in our method: 1) it adopts a new clipping function to support a rollback behavior to restrict the difference between the new policy and the old one; 2) the triggering condition for clipping is replaced with a trust region-based one, such that optimizing the resulted surrogate objective function provides guaranteed monotonic improvement of the ultimate policy performance. It seems, by adhering more truly to making the algorithm proximal - confining the policy within the trust region, the new algorithm improves the original PPO on both sample efficiency and performance.
+
+You can read full detail of Truly PPO in [here](https://arxiv.org/abs/1903.07940)
+
 ## Result
 
 ### LunarLander using PPO (Non RND)
@@ -87,9 +102,6 @@ You can read full detail of RND in [here](https://openai.com/blog/reinforcement-
 | Result Gif    |
 | ------------- |
 | ![Result Gif](https://github.com/wisnunugroho21/reinforcement_learning_ppo_rnd/blob/master/Result/pong.gif) |
-
-## Future Development
-For now, I focus on how to implement this project on more difficult environment (Atari games, MuJoCo, etc)
 
 ## Contributing
 This project is far from finish and will be improved anytime . Any fix, contribute, or idea would be very appreciated

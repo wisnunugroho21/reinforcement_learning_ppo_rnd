@@ -1,2 +1,0 @@
-model_checkpoint_path: "critic_old_pong_ppo_rnd.hd5"
-all_model_checkpoint_paths: "critic_old_pong_ppo_rnd.hd5"
