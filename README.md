@@ -1,6 +1,3 @@
-## Version 2
-Version 2 is not yet ready. You can use pytorch version of PPO & PPO_continous, but the rest is not yet finished. Currently working on PPO_RND
-
 # PPO-RND
 
 Simple code to demonstrate Deep Reinforcement Learning by using Proximal Policy Optimization and Random Network Distillation in Tensorflow 2 and Pytorch
@@ -64,6 +61,15 @@ Random Network Distillation (RND), a prediction-based method for encouraging rei
 RND incentivizes visiting unfamiliar states by measuring how hard it is to predict the output of a fixed random neural network on visited states. In unfamiliar states it’s hard to guess the output, and hence the reward is high. It can be applied to any reinforcement learning algorithm, is simple to implement and efficient to scale. 
 
 You can read full detail of RND in [here](https://openai.com/blog/reinforcement-learning-with-prediction-based-rewards/)
+
+## Truly Proximal Policy Optimization
+
+Proximal policy optimization (PPO) is one of the most successful deep reinforcement-learning methods, achieving state-of-the-art performance across a wide range of challenging tasks. However, its optimization behavior is still far from being fully understood. In this paper, we show that PPO could neither strictly restrict the likelihood ratio as it attempts to do nor enforce a well-defined trust region constraint, which means that it may still suffer from the risk of performance instability. To address this issue, we present an enhanced PPO method, named Truly PPO. Two critical improvements are made in our method: 1) it adopts a new clipping function to support a rollback behavior to restrict the difference between the new policy and the old one; 2) the triggering condition for clipping is replaced with a trust region-based one, such that optimizing the resulted surrogate objective function provides guaranteed monotonic improvement of the ultimate policy performance. It seems, by adhering more truly to making the algorithm proximal - confining the policy within the trust region, the new algorithm improves the original PPO on both sample efficiency and performance.
+
+You can read full detail of Truly PPO in [here](https://arxiv.org/abs/1903.07940)
+
+## Version 2
+Version 2 is not yet ready. You can use pytorch version of PPO & PPO_continous, but the rest is not yet finished. Currently working on PPO_RND
 
 ## Result
 
