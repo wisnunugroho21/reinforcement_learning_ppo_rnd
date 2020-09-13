@@ -529,7 +529,7 @@ def main():
     lam                 = 0.95 # Just set to 0.95
     learning_rate       = 2.5e-4 # Just set to 0.95
     ############################################# 
-    env_name            = 'FrozenLakeNotSlippery-v0' # Set the env you want
+    env_name            = 'Env Name' # Set the env you want
     env                 = gym.make(env_name)
 
     state_dim           = env.observation_space.n
