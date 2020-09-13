@@ -3,7 +3,7 @@
 Simple code to demonstrate Deep Reinforcement Learning by using Proximal Policy Optimization and Random Network Distillation in Tensorflow 2 and Pytorch
 
 ## Version 2 and Other Progress
-Version 2 will bring improvement in code quality and peformance. I refactor the code so it will follow algorithm in PPO's implementation on OpenAI's baseline. I also using newer version of PPO called Truly PPO, which has more sample efficiency and performance. 
+Version 2 will bring improvement in code quality and peformance. I refactor the code so it will follow algorithm in PPO's implementation on OpenAI's baseline. I also using newer version of PPO called Truly PPO, which has more sample efficiency and performance than OpenAI's PPO
 
 - [x] Use Pytorch and Tensorflow 2
 - [x] Clean up the code
