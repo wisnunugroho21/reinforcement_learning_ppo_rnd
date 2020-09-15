@@ -451,7 +451,7 @@ def run_inits_episode(env, agent, state_dim, render, n_init_episode):
             env.reset()
 
     agent.updateObsNormalizationParam(agent.obs_memory.observations)
-    agent.memory.clearObs()
+    agent.obs_memory.clearMemory()
 
     return agent
 
@@ -514,6 +514,7 @@ def main():
     n_eps_update        = 5 # How many episode before you update the PPO. Recommended set to 5 for Discrete
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
+    n_init_episode      = 1024
     n_saved             = 10 # How many episode to run before saving the weights
 
     policy_kl_range     = 0.0008 # Recommended set to 0.0008 for Discrete
@@ -553,6 +554,13 @@ def main():
     batch_times         = []
 
     t_updates           = 0
+
+    #############################################
+
+    if training_mode:
+        agent = run_inits_episode(env, agent, state_dim, render, n_init_episode)
+
+    #############################################
 
     for i_episode in range(1, n_episode + 1):
         total_reward, time, t_updates = run_episode(env, agent, state_dim, render, training_mode, t_updates, n_step_update)
