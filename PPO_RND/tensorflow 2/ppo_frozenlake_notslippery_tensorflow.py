@@ -165,12 +165,12 @@ class PolicyFunction():
         self.gamma  = gamma
         self.lam    = lam
 
-    def monte_carlo_discounted(self, datas):
-        returns     = []        
+    def monte_carlo_discounted(self, rewards, dones):
         running_add = 0
+        returns     = []        
         
-        for i in reversed(range(len(datas))):
-            running_add = running_add * self.gamma + datas[i]
+        for step in reversed(range(len(rewards))):
+            running_add = rewards[step] + (1.0 - dones[step]) * self.gamma * running_add
             returns.insert(0, running_add)
             
         return tf.stack(returns)
