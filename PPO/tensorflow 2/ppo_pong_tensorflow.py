@@ -410,9 +410,16 @@ def main():
             plot(times)
 
     print('========== Final ==========')
-     # Plot the reward, times for every episode
+    # Plot the reward, times for every episode
+
+    for reward in batch_rewards:
+        rewards.append(reward)
+
+    for time in batch_times:
+        times.append(time)
+
     plot(rewards)
-    plot(times) 
+    plot(times)
 
 if __name__ == '__main__':
     main()

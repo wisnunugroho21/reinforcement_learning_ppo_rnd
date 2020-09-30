@@ -597,13 +597,7 @@ def main():
 
         if reward_threshold:
             if len(batch_solved_reward) == 100:            
-                if np.mean(batch_solved_reward) >= reward_threshold :              
-                    for reward in batch_rewards:
-                        rewards.append(reward)
-
-                    for time in batch_times:
-                        times.append(time)                    
-
+                if np.mean(batch_solved_reward) >= reward_threshold:
                     print('You solved task after {} episode'.format(len(rewards)))
                     break
 
@@ -634,9 +628,16 @@ def main():
             plot(times)
 
     print('========== Final ==========')
-     # Plot the reward, times for every episode
+    # Plot the reward, times for every episode
+
+    for reward in batch_rewards:
+        rewards.append(reward)
+
+    for time in batch_times:
+        times.append(time)
+
     plot(rewards)
-    plot(times) 
+    plot(times)
 
 if __name__ == '__main__':
     main()
