@@ -312,7 +312,7 @@ class Agent():
         pg_loss         = torch.where(
                 (Kl >= self.policy_kl_range) & (ratios >= 1),
                 ratios * Advantages - self.policy_params * Kl,
-                ratios * Advantages - self.policy_kl_range
+                ratios * Advantages
         ) 
         pg_loss         = pg_loss.mean()
 

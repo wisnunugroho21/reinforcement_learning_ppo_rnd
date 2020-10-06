@@ -293,7 +293,7 @@ class Agent():
         pg_loss         = tf.where(
                 tf.logical_and(Kl >= self.policy_kl_range, ratios >= 1),
                 ratios * Advantages - self.policy_params * Kl,
-                ratios * Advantages - self.policy_kl_range
+                ratios * Advantages
         )
         pg_loss         = tf.math.reduce_mean(pg_loss)
 
