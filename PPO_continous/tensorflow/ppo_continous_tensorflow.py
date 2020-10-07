@@ -91,13 +91,13 @@ class Distributions():
       
     def logprob(self, mean, std, value_data):
         distribution = tfp.distributions.Normal(mean, std)
-        return tf.expand_dims(distribution.log_prob(value_data), 1)
+        return distribution.log_prob(value_data)
 
     def kl_divergence(self, mean1, std1, mean2, std2):
         distribution1 = tfp.distributions.Normal(mean1, std1)
         distribution2 = tfp.distributions.Normal(mean2, std2)
 
-        return tf.expand_dims(tfp.distributions.kl_divergence(distribution1, distribution2), 1)
+        return tfp.distributions.kl_divergence(distribution1, distribution2)
 
 class PolicyFunction():
     def __init__(self, gamma = 0.99, lam = 0.95):
