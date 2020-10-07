@@ -5,7 +5,6 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow.keras.layers import Dense
 from tensorflow.keras import Model
-from tensorflow.keras.utils import to_categorical
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -177,7 +176,7 @@ class Agent():
 
         # Combining TR-PPO with Rollback (Truly PPO)
         pg_loss         = tf.where(
-                tf.logical_and(Kl >= self.policy_kl_range, ratios >= 1),
+                tf.logical_and(Kl >= self.policy_kl_range, ratios > 1),
                 ratios * Advantages - self.policy_params * Kl,
                 ratios * Advantages
         )

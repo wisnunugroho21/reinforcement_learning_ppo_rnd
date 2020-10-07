@@ -7,7 +7,6 @@ from torch.distributions import Categorical
 from torch.distributions.kl import kl_divergence
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
-import torchvision
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -190,7 +189,7 @@ class Agent():
 
         # Combining TR-PPO with Rollback (Truly PPO)
         pg_loss         = torch.where(
-                (Kl >= self.policy_kl_range) & (ratios >= 1),
+                (Kl >= self.policy_kl_range) & (ratios > 1),
                 ratios * Advantages - self.policy_params * Kl,
                 ratios * Advantages
         ) 
