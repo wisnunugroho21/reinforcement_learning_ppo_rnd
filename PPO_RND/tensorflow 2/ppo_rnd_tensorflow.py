@@ -87,7 +87,7 @@ class ObsMemory():
     def __len__(self):
         return len(self.observations)
 
-    def get_all_items(self):
+    def get_all_tensor(self):
         observations = tf.constant(self.observations, dtype = tf.float32)        
         return tf.data.Dataset.from_tensor_slices(observations)
 
@@ -117,7 +117,10 @@ class Memory():
     def __len__(self):
         return len(self.dones)
 
-    def get_all_items(self):
+    def get_all(self):
+        return tf.constant(self.observations, dtype = tf.float32)
+
+    def get_all_tensor(self):
         states = tf.constant(self.states, dtype = tf.float32)
         actions = tf.constant(self.actions, dtype = tf.float32)
         rewards = tf.expand_dims(tf.constant(self.rewards, dtype = tf.float32), 1)
@@ -331,6 +334,15 @@ class Agent():
               
         return action
 
+    @tf.function
+    def compute_intrinsic_reward(self, obs, mean_obs, std_obs):
+        obs             = self.utils.normalize(obs, mean_obs, std_obs)
+        
+        state_pred      = self.rnd_predict(obs)
+        state_target    = self.rnd_target(obs)
+
+        return (state_target - state_pred)
+
     # Get loss and Do backpropagation
     @tf.function
     def training_rnd(self, obs, mean_obs, std_obs):
@@ -344,8 +356,6 @@ class Agent():
 
         gradients = tape.gradient(loss, self.rnd_predict.trainable_variables)        
         self.rnd_optimizer.apply_gradients(zip(gradients, self.rnd_predict.trainable_variables))
-
-        return (state_target - state_pred)
 
     # Get loss and Do backpropagation
     @tf.function
@@ -373,8 +383,10 @@ class Agent():
         # Optimize policy for K epochs:
         intrinsic_rewards = 0
         for _ in range(self.RND_epochs):       
-            for obs in self.obs_memory.get_all_items().batch(batch_size):
-                intrinsic_rewards = self.training_rnd(obs, self.obs_memory.mean_obs, self.obs_memory.std_obs)       
+            for obs in self.obs_memory.get_all_tensor().batch(batch_size):
+                self.training_rnd(obs, self.obs_memory.mean_obs, self.obs_memory.std_obs)
+
+        intrinsic_rewards = self.compute_intrinsic_reward(self.obs_memory.get_all(), self.obs_memory.mean_obs, self.obs_memory.std_obs)
 
         self.updateObsNormalizationParam(self.obs_memory.observations)
         self.updateRwdNormalizationParam(intrinsic_rewards)
@@ -388,7 +400,7 @@ class Agent():
 
         # Optimize policy for K epochs:
         for _ in range(self.PPO_epochs):       
-            for states, actions, rewards, dones, next_states in self.memory.get_all_items().batch(batch_size):
+            for states, actions, rewards, dones, next_states in self.memory.get_all_tensor().batch(batch_size):
                 self.training_ppo(states, actions, rewards, dones, next_states,
                     self.obs_memory.mean_obs, self.obs_memory.std_obs, self.obs_memory.std_in_rewards)
 

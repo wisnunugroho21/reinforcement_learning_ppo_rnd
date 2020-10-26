@@ -72,7 +72,7 @@ class Memory():
         self.dones.append(done)
         self.next_states.append(next_state)        
 
-    def clearMemory(self):
+    def clear_memory(self):
         del self.actions[:]
         del self.states[:]
         del self.rewards[:]
@@ -233,7 +233,7 @@ class Agent():
                 self.training_ppo(states, actions, rewards, dones, next_states)
 
         # Clear the memory
-        self.memory.clearMemory()
+        self.memory.clear_memory()
 
         # Copy new weights into old policy:
         self.actor_old.set_weights(self.actor.get_weights())

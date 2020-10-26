@@ -5,6 +5,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow.keras.layers import Dense
 from tensorflow.keras import Model
+from tensorflow.keras.utils import to_categorical
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,10 +22,10 @@ class Utils():
         X           = I.astype(np.float32).ravel() # Combine items in 1 array 
         return X
 
-    def countNewMean(self, prevMean, prevLen, newData):
+    def count_new_mean(self, prevMean, prevLen, newData):
         return ((prevMean * prevLen) + tf.math.reduce_sum(newData, 0)) / (prevLen + newData.shape[0])
       
-    def countNewStd(self, prevStd, prevLen, newData):
+    def count_new_std(self, prevStd, prevLen, newData):
         return tf.math.sqrt(((tf.math.square(prevStd) * prevLen) + (tf.math.reduce_variance(newData, 0) * newData.shape[0])) / (prevStd + newData.shape[0]))
 
     def normalize(self, data, mean = None, std = None, clip = None):
@@ -87,7 +88,10 @@ class ObsMemory():
     def __len__(self):
         return len(self.observations)
 
-    def get_all_items(self):
+    def get_all(self):
+        return tf.constant(self.observations, dtype = tf.float32)
+
+    def get_all_tensor(self):
         observations = tf.constant(self.observations, dtype = tf.float32)        
         return tf.data.Dataset.from_tensor_slices(observations)
 
@@ -103,7 +107,7 @@ class ObsMemory():
         self.std_in_rewards     = std_in_rewards
         self.total_number_rwd   = total_number_rwd
 
-    def clearMemory(self):
+    def clear_memory(self):
         del self.observations[:]
 
 class Memory():
@@ -117,7 +121,7 @@ class Memory():
     def __len__(self):
         return len(self.dones)
 
-    def get_all_items(self):
+    def get_all_tensor(self):
         states = tf.constant(self.states, dtype = tf.float32)
         actions = tf.constant(self.actions, dtype = tf.float32)
         rewards = tf.expand_dims(tf.constant(self.rewards, dtype = tf.float32), 1)
@@ -133,7 +137,7 @@ class Memory():
         self.dones.append(done)
         self.next_states.append(next_state)        
 
-    def clearMemory(self):
+    def clear_memory(self):
         del self.actions[:]
         del self.states[:]
         del self.rewards[:]
@@ -235,20 +239,20 @@ class Agent():
     def save_observation(self, obs):
         self.obs_memory.save_eps(obs)
 
-    def updateObsNormalizationParam(self, obs):
+    def update_obs_normalization_param(self, obs):
         obs                 = tf.constant(obs, dtype = tf.float32)
 
-        mean_obs            = self.utils.countNewMean(self.obs_memory.mean_obs, self.obs_memory.total_number_obs, obs)
-        std_obs             = self.utils.countNewStd(self.obs_memory.std_obs, self.obs_memory.total_number_obs, obs)
+        mean_obs            = self.utils.count_new_mean(self.obs_memory.mean_obs, self.obs_memory.total_number_obs, obs)
+        std_obs             = self.utils.count_new_std(self.obs_memory.std_obs, self.obs_memory.total_number_obs, obs)
         total_number_obs    = len(obs) + self.obs_memory.total_number_obs
         
         self.obs_memory.save_observation_normalize_parameter(mean_obs, std_obs, total_number_obs)
     
-    def updateRwdNormalizationParam(self, in_rewards):
-        std_in_rewards      = self.utils.countNewStd(self.obs_memory.std_in_rewards, self.obs_memory.total_number_rwd, in_rewards)
+    def update_rwd_normalization_param(self, in_rewards):
+        std_in_rewards      = self.utils.count_new_std(self.obs_memory.std_in_rewards, self.obs_memory.total_number_rwd, in_rewards)
         total_number_rwd    = len(in_rewards) + self.obs_memory.total_number_rwd
         
-        self.obs_memory.save_rewards_normalize_parameter(std_in_rewards, total_number_rwd)
+        self.obs_memory.save_rewards_normalize_parameter(std_in_rewards, total_number_rwd)    
 
     # Loss for RND 
     def get_rnd_loss(self, state_pred, state_target):        
@@ -331,6 +335,15 @@ class Agent():
               
         return action
 
+    @tf.function
+    def compute_intrinsic_reward(self, obs, mean_obs, std_obs):
+        obs             = self.utils.normalize(obs, mean_obs, std_obs)
+        
+        state_pred      = self.rnd_predict(obs)
+        state_target    = self.rnd_target(obs)
+
+        return (state_target - state_pred)
+
     # Get loss and Do backpropagation
     @tf.function
     def training_rnd(self, obs, mean_obs, std_obs):
@@ -344,8 +357,6 @@ class Agent():
 
         gradients = tape.gradient(loss, self.rnd_predict.trainable_variables)        
         self.rnd_optimizer.apply_gradients(zip(gradients, self.rnd_predict.trainable_variables))
-
-        return (state_target - state_pred)
 
     # Get loss and Do backpropagation
     @tf.function
@@ -373,14 +384,16 @@ class Agent():
         # Optimize policy for K epochs:
         intrinsic_rewards = 0
         for _ in range(self.RND_epochs):       
-            for obs in self.obs_memory.get_all_items().batch(batch_size):
-                intrinsic_rewards = self.training_rnd(obs, self.obs_memory.mean_obs, self.obs_memory.std_obs)       
+            for obs in self.obs_memory.get_all_tensor().batch(batch_size):
+                self.training_rnd(obs, self.obs_memory.mean_obs, self.obs_memory.std_obs)
 
-        self.updateObsNormalizationParam(self.obs_memory.observations)
-        self.updateRwdNormalizationParam(intrinsic_rewards)
+        intrinsic_rewards = self.compute_intrinsic_reward(self.obs_memory.get_all(), self.obs_memory.mean_obs, self.obs_memory.std_obs)
+
+        self.update_obs_normalization_param(self.obs_memory.observations)
+        self.update_rwd_normalization_param(intrinsic_rewards)
 
         # Clear the memory
-        self.obs_memory.clearMemory()
+        self.obs_memory.clear_memory()
 
     # Update the model
     def update_ppo(self):        
@@ -388,12 +401,12 @@ class Agent():
 
         # Optimize policy for K epochs:
         for _ in range(self.PPO_epochs):       
-            for states, actions, rewards, dones, next_states in self.memory.get_all_items().batch(batch_size):
+            for states, actions, rewards, dones, next_states in self.memory.get_all_tensor().batch(batch_size):
                 self.training_ppo(states, actions, rewards, dones, next_states,
                     self.obs_memory.mean_obs, self.obs_memory.std_obs, self.obs_memory.std_in_rewards)
 
         # Clear the memory
-        self.memory.clearMemory()
+        self.memory.clear_memory()
 
         # Copy new weights into old policy:
         self.actor_old.set_weights(self.actor.get_weights())
@@ -449,8 +462,8 @@ def run_inits_episode(env, agent, state_dim, render, n_init_episode):
         if done:
             env.reset()
 
-    agent.updateObsNormalizationParam(agent.obs_memory.observations)
-    agent.obs_memory.clearMemory()
+    agent.update_obs_normalization_param(agent.obs_memory.observations)
+    agent.obs_memory.clear_memory()
 
     return agent
 

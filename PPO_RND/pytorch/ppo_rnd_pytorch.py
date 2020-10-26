@@ -26,17 +26,17 @@ class Utils():
         X           = I.astype(np.float32).ravel() # Combine items in 1 array 
         return X
 
-    def countNewMean(self, prevMean, prevLen, newData):
+    def count_new_mean(self, prevMean, prevLen, newData):
         return ((prevMean * prevLen) + newData.sum(0)) / (prevLen + newData.shape[0])
       
-    def countNewStd(self, prevStd, prevLen, newData):
+    def count_new_std(self, prevStd, prevLen, newData):
         return (((prevStd.pow(2) * prevLen) + (newData.var(0) * newData.shape[0])) / (prevLen + newData.shape[0])).sqrt()
 
     def normalize(self, data, mean = None, std = None, clip = None):
         if isinstance(mean, torch.Tensor) and isinstance(std, torch.Tensor):
             data_normalized = (data - mean) / (std + 1e-8)            
         else:
-            data_normalized = (data - torch.mean(data)) / (torch.std(data) + 1e-8)
+            data_normalized = (data - data.mean()) / (data.std() + 1e-8)
                     
         if clip:
             data_normalized = torch.clamp(data_normalized, -1 * clip, clip)
@@ -105,6 +105,9 @@ class ObsMemory(Dataset):
     def __getitem__(self, idx):
         return np.array(self.observations[idx], dtype = np.float32)
 
+    def get_all(self):
+        return torch.FloatTensor(self.observations)
+
     def save_eps(self, obs):
         self.observations.append(obs)
 
@@ -117,7 +120,7 @@ class ObsMemory(Dataset):
         self.std_in_rewards     = std_in_rewards
         self.total_number_rwd   = total_number_rwd
 
-    def clearMemory(self):
+    def clear_memory(self):
         del self.observations[:]
 
 class Memory(Dataset):
@@ -141,7 +144,7 @@ class Memory(Dataset):
         self.dones.append(done)
         self.next_states.append(next_state)       
 
-    def clearMemory(self):
+    def clear_memory(self):
         del self.actions[:]
         del self.states[:]
         del self.rewards[:]
@@ -253,20 +256,20 @@ class Agent():
     def save_observation(self, obs):
         self.obs_memory.save_eps(obs)
 
-    def updateObsNormalizationParam(self, obs):
+    def update_obs_normalization_param(self, obs):
         obs                 = torch.FloatTensor(obs).to(device).detach()
 
-        mean_obs            = self.utils.countNewMean(self.obs_memory.mean_obs, self.obs_memory.total_number_obs, obs)
-        std_obs             = self.utils.countNewStd(self.obs_memory.std_obs, self.obs_memory.total_number_obs, obs)
+        mean_obs            = self.utils.count_new_mean(self.obs_memory.mean_obs, self.obs_memory.total_number_obs, obs)
+        std_obs             = self.utils.count_new_std(self.obs_memory.std_obs, self.obs_memory.total_number_obs, obs)
         total_number_obs    = len(obs) + self.obs_memory.total_number_obs
         
         self.obs_memory.save_observation_normalize_parameter(mean_obs, std_obs, total_number_obs)
     
-    def updateRwdNormalizationParam(self, in_rewards):
-        std_in_rewards      = self.utils.countNewStd(self.obs_memory.std_in_rewards, self.obs_memory.total_number_rwd, in_rewards)
+    def update_rwd_normalization_param(self, in_rewards):
+        std_in_rewards      = self.utils.count_new_std(self.obs_memory.std_in_rewards, self.obs_memory.total_number_rwd, in_rewards)
         total_number_rwd    = len(in_rewards) + self.obs_memory.total_number_rwd
         
-        self.obs_memory.save_rewards_normalize_parameter(std_in_rewards, total_number_rwd)
+        self.obs_memory.save_rewards_normalize_parameter(std_in_rewards, total_number_rwd)    
 
     # Loss for RND 
     def get_rnd_loss(self, state_pred, state_target):        
@@ -287,13 +290,13 @@ class Agent():
         # Getting external general advantages estimator
         External_Advantages     = self.policy_function.generalized_advantage_estimation(ex_values, ex_rewards, next_ex_values, dones)
         External_Returns        = (External_Advantages + ex_values).detach()
-        External_Advantages     = ((External_Advantages - External_Advantages.mean()) / (External_Advantages.std() + 1e-6)).detach()
+        External_Advantages     = self.utils.normalize(External_Advantages).detach()
 
         # Computing internal reward, then getting internal general advantages estimator
         in_rewards              = (state_targets - state_preds).pow(2) * 0.5 / (std_in_rewards.mean() + 1e-8)
         Internal_Advantages     = self.policy_function.generalized_advantage_estimation(in_values, in_rewards, next_in_values, dones)
         Internal_Returns        = (Internal_Advantages + in_values).detach()
-        Internal_Advantages     = ((Internal_Advantages - Internal_Advantages.mean()) / (Internal_Advantages.std() + 1e-6)).detach()        
+        Internal_Advantages     = self.utils.normalize(Internal_Advantages).detach()      
 
         # Getting overall advantages
         Advantages              = (self.ex_advantages_coef * External_Advantages + self.in_advantages_coef * Internal_Advantages).detach()
@@ -311,7 +314,7 @@ class Agent():
                 (Kl >= self.policy_kl_range) & (ratios > 1),
                 ratios * Advantages - self.policy_params * Kl,
                 ratios * Advantages
-        ) 
+        )
         pg_loss         = pg_loss.mean()
 
         # Getting entropy from the action probability 
@@ -348,6 +351,14 @@ class Agent():
               
         return action.cpu().item()
 
+    def compute_intrinsic_reward(self, obs, mean_obs, std_obs):
+        obs             = self.utils.normalize(obs, mean_obs, std_obs)
+        
+        state_pred      = self.rnd_predict(obs)
+        state_target    = self.rnd_target(obs)
+
+        return (state_target - state_pred)
+
     # Get loss and Do backpropagation
     def training_rnd(self, obs, mean_obs, std_obs):
         obs             = self.utils.normalize(obs, mean_obs, std_obs)
@@ -360,8 +371,6 @@ class Agent():
         self.rnd_predict_optimizer.zero_grad()
         loss.backward()
         self.rnd_predict_optimizer.step()
-
-        return (state_target - state_pred)
 
     # Get loss and Do backpropagation
     def training_ppo(self, states, actions, rewards, dones, next_states, mean_obs, std_obs, std_in_rewards):
@@ -393,16 +402,17 @@ class Agent():
         dataloader  = DataLoader(self.obs_memory, batch_size, shuffle = False)        
 
         # Optimize policy for K epochs:
-        intrinsic_rewards = 0
         for _ in range(self.RND_epochs):       
             for obs in dataloader:
-                intrinsic_rewards = self.training_rnd(obs.float().to(device), self.obs_memory.mean_obs.float().to(device), self.obs_memory.std_obs.float().to(device))       
+                self.training_rnd(obs.float().to(device), self.obs_memory.mean_obs.float().to(device), self.obs_memory.std_obs.float().to(device))       
 
-        self.updateObsNormalizationParam(self.obs_memory.observations)
-        self.updateRwdNormalizationParam(intrinsic_rewards)
+        intrinsic_rewards = self.compute_intrinsic_reward(self.obs_memory.get_all().to(device), self.obs_memory.mean_obs.to(device), self.obs_memory.std_obs.to(device))
+        
+        self.update_obs_normalization_param(self.obs_memory.observations)
+        self.update_rwd_normalization_param(intrinsic_rewards)
 
         # Clear the memory
-        self.obs_memory.clearMemory()
+        self.obs_memory.clear_memory()
 
     # Update the model
     def update_ppo(self):        
@@ -416,7 +426,7 @@ class Agent():
                     self.obs_memory.mean_obs.float().to(device), self.obs_memory.std_obs.float().to(device), self.obs_memory.std_in_rewards.float().to(device))
 
         # Clear the memory
-        self.memory.clearMemory()
+        self.memory.clear_memory()
 
         # Copy new weights into old policy:
         self.actor_old.load_state_dict(self.actor.state_dict())
@@ -480,8 +490,8 @@ def run_inits_episode(env, agent, state_dim, render, n_init_episode):
         if done:
             env.reset()
 
-    agent.updateObsNormalizationParam(agent.obs_memory.observations)
-    agent.obs_memory.clearMemory()
+    agent.update_obs_normalization_param(agent.obs_memory.observations)
+    agent.obs_memory.clear_memory()
 
     return agent
 

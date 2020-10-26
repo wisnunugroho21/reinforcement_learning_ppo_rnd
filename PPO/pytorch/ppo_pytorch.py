@@ -1,4 +1,5 @@
 import gym
+import slimevolleygym
 from gym.envs.registration import register
     
 import torch
@@ -31,9 +32,9 @@ class Actor_Model(nn.Module):
         super(Actor_Model, self).__init__()   
 
         self.nn_layer = nn.Sequential(
-                nn.Linear(state_dim, 64),
+                nn.Linear(state_dim, 256),
                 nn.ReLU(),
-                nn.Linear(64, 64),
+                nn.Linear(256, 64),
                 nn.ReLU(),
                 nn.Linear(64, action_dim),
                 nn.Softmax(-1)
@@ -47,9 +48,9 @@ class Critic_Model(nn.Module):
         super(Critic_Model, self).__init__()   
 
         self.nn_layer = nn.Sequential(
-                nn.Linear(state_dim, 64),
+                nn.Linear(state_dim, 256),
                 nn.ReLU(),
-                nn.Linear(64, 64),
+                nn.Linear(256, 64),
                 nn.ReLU(),
                 nn.Linear(64, 1)
               ).float().to(device)
@@ -78,7 +79,7 @@ class Memory(Dataset):
         self.dones.append(done)
         self.next_states.append(next_state)        
 
-    def clearMemory(self):
+    def clear_memory(self):
         del self.actions[:]
         del self.states[:]
         del self.rewards[:]
@@ -250,7 +251,7 @@ class Agent():
                 self.training_ppo(states.float().to(device), actions.float().to(device), rewards.float().to(device), dones.float().to(device), next_states.float().to(device))
 
         # Clear the memory
-        self.memory.clearMemory()
+        self.memory.clear_memory()
 
         # Copy new weights into old policy:
         self.actor_old.load_state_dict(self.actor.state_dict())
@@ -260,19 +261,19 @@ class Agent():
         torch.save({
             'model_state_dict': self.actor.state_dict(),
             'optimizer_state_dict': self.actor_optimizer.state_dict()
-            }, '/test/My Drive/Bipedal4/actor.tar')
+            }, 'SlimeVolley/actor.tar')
         
         torch.save({
             'model_state_dict': self.critic.state_dict(),
             'optimizer_state_dict': self.critic_optimizer.state_dict()
-            }, '/test/My Drive/Bipedal4/critic.tar')
+            }, 'SlimeVolley/critic.tar')
         
     def load_weights(self):
-        actor_checkpoint = torch.load('/test/My Drive/Bipedal4/actor.tar')
+        actor_checkpoint = torch.load('SlimeVolley/actor.tar')
         self.actor.load_state_dict(actor_checkpoint['model_state_dict'])
         self.actor_optimizer.load_state_dict(actor_checkpoint['optimizer_state_dict'])
 
-        critic_checkpoint = torch.load('/test/My Drive/Bipedal4/critic.tar')
+        critic_checkpoint = torch.load('SlimeVolley/critic.tar')
         self.critic.load_state_dict(critic_checkpoint['model_state_dict'])
         self.critic_optimizer.load_state_dict(critic_checkpoint['optimizer_state_dict'])
 
@@ -299,7 +300,21 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
     
     while not done:
         action                      = int(agent.act(state))
-        next_state, reward, done, _ = env.step(action)
+
+        if action == 0:
+            action_gym = [0, 0, 0] # NOOP
+        elif action == 1:
+            action_gym = [1, 0, 0] # LEFT (forward)
+        elif action == 2:
+            action_gym = [0, 1, 0] # RIGHT (backward)
+        elif action == 3:
+            action_gym = [0, 0, 1] # UP (jump)
+        elif action == 4:
+            action_gym = [1, 0, 1] # UPLEFT (forward jump)
+        elif action == 5:
+            action_gym = [0, 1, 1] # UPRIGHT (backward jump)
+
+        next_state, reward, done, _ = env.step(action_gym)
         
         eps_time        += 1 
         t_updates       += 1
@@ -323,13 +338,13 @@ def run_episode(env, agent, state_dim, render, training_mode, t_updates, n_updat
 
 def main():
     ############## Hyperparameters ##############
-    load_weights        = False # If you want to load the agent, set this to True
-    save_weights        = False # If you want to save the agent, set this to True
+    load_weights        = True # If you want to load the agent, set this to True
+    save_weights        = True # If you want to save the agent, set this to True
     training_mode       = True # If you want to train the agent, set this to True. But set this otherwise if you only want to test it
     reward_threshold    = 300 # Set threshold for reward. The learning will stop if reward has pass threshold. Set none to sei this off
     using_google_drive  = False
 
-    render              = False # If you want to display the image, set this to True. Turn this off if you run this in Google Collab
+    render              = True # If you want to display the image, set this to True. Turn this off if you run this in Google Collab
     n_update            = 128 # How many episode before you update the Policy. Recommended set to 128 for Discrete
     n_plot_batch        = 100000000 # How many episode you want to plot the result
     n_episode           = 100000 # How many episode you want to run
@@ -347,11 +362,11 @@ def main():
     lam                 = 0.95 # Just set to 0.95
     learning_rate       = 2.5e-4 # Just set to 0.95
     ############################################# 
-    env_name            = 'Env Name' # Set the env you want
+    env_name            = 'SlimeVolley-v0' # Set the env you want
     env                 = gym.make(env_name)
 
-    state_dim           = env.observation_space.n
-    action_dim          = env.action_space.n
+    state_dim           = env.observation_space.shape[0]
+    action_dim          = 6 # env.action_space.n
 
     agent               = Agent(state_dim, action_dim, training_mode, policy_kl_range, policy_params, value_clip, entropy_coef, vf_loss_coef,
                             minibatch, PPO_epochs, gamma, lam, learning_rate)  
