@@ -41,13 +41,13 @@ After you clone the project, run following script in cmd/terminal :
 #### Pytorch version
 ```
 cd reinforcement_learning_ppo_rnd/PPO_RND/pytorch
-python ppo_rnd_2_taxi_final_blow.py
+python ppo_rnd_frozen_notslippery_pytorch.py
 ```
 
 #### Tensorflow 2 version
 ```
 cd reinforcement_learning_ppo_rnd/PPO_RND/'tensorflow 2'
-python ppo_taxi_final_blow_tensorflow.py
+python ppo_frozenlake_notslippery_tensorflow.py
 ```
 
 ## Proximal Policy Optimization
