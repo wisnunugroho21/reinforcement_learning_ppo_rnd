@@ -167,7 +167,7 @@ class TrulyPPO():
         Kl              = self.distributions.kl_divergence(old_action_probs, action_probs)
 
         pg_targets  = torch.where(
-            (Kl >= self.policy_kl_range) & (ratios > 1),
+            (Kl >= self.policy_kl_range) & (ratios * Advantages > Advantages),
             ratios * Advantages - self.policy_params * Kl,
             ratios * Advantages
         )

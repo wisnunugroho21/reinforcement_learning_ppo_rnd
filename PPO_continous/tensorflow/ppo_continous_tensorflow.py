@@ -176,7 +176,9 @@ class Agent():
 
         # Combining TR-PPO with Rollback (Truly PPO)
         pg_loss         = tf.where(
-                tf.logical_and(Kl >= self.policy_kl_range, ratios > 1),
+                tf.logical_and(
+                    Kl >= self.policy_kl_range, ratios * Advantages > Advantages
+                ),
                 ratios * Advantages - self.policy_params * Kl,
                 ratios * Advantages
         )
